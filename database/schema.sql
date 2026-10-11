@@ -1,0 +1,180 @@
+-- ParkWise Database Schema
+-- Run this in Supabase SQL Editor
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Create custom types
+CREATE TYPE user_role AS ENUM ('customer', 'attendant', 'admin');
+CREATE TYPE user_status AS ENUM ('active', 'disabled');
+CREATE TYPE slot_status AS ENUM ('available', 'reserved', 'occupied', 'unverified', 'overstay', 'maintenance');
+CREATE TYPE reservation_status AS ENUM ('pending', 'active', 'verified', 'completed', 'cancelled', 'no_show', 'overstay');
+CREATE TYPE agent_state AS ENUM ('idle', 'waiting', 'verifying', 'verified', 'alert');
+CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed');
+CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');
+CREATE TYPE payment_status AS ENUM ('unpaid', 'paid');
+CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');
+
+-- Profiles table (linked to auth.users)
+CREATE TABLE profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  role user_role NOT NULL DEFAULT 'customer',
+  status user_status NOT NULL DEFAULT 'active',
+  pwd_permit_number TEXT,
+  pwd_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Vehicles table
+CREATE TABLE vehicles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  plate_number TEXT NOT NULL UNIQUE,
+  vehicle_type TEXT NOT NULL,
+  is_default BOOLEAN NOT NULL DEFAULT FALSE,
+  CONSTRAINT owner_plate_unique UNIQUE (owner_id, plate_number)
+);
+
+-- Slots table
+CREATE TABLE slots (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  slot_code TEXT NOT NULL UNIQUE,
+  is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
+  status slot_status NOT NULL DEFAULT 'available',
+  current_reservation_id UUID
+);
+
+-- Reservations table
+CREATE TABLE reservations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
+  slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+  start_time TIMESTAMP WITH TIME ZONE NOT NULL,
+  end_time TIMESTAMP WITH TIME ZONE NOT NULL,
+  status reservation_status NOT NULL DEFAULT 'pending',
+  booking_code TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  cancelled_at TIMESTAMP WITH TIME ZONE,
+  CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
+    slot_id WITH =,
+    tstzrange(start_time, end_time) WITH &&
+  )
+);
+
+-- Agent states table (for camera/verification system)
+CREATE TABLE agent_states (
+  slot_id UUID PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
+  state agent_state NOT NULL DEFAULT 'idle',
+  expected_plate TEXT,
+  accepted_at TIMESTAMP WITH TIME ZONE,
+  detected_plate TEXT,
+  confidence NUMERIC,
+  last_frame_url TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Verification events table
+CREATE TABLE verification_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  detected_plate TEXT NOT NULL,
+  expected_plate TEXT NOT NULL,
+  confidence NUMERIC NOT NULL,
+  result verification_result NOT NULL,
+  frame_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Penalties table
+CREATE TABLE penalties (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  type penalty_type NOT NULL,
+  amount NUMERIC NOT NULL,
+  status payment_status NOT NULL DEFAULT 'unpaid',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Payments table
+CREATE TABLE payments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  base_charge NUMERIC NOT NULL DEFAULT 0,
+  overstay_surcharge NUMERIC NOT NULL DEFAULT 0,
+  penalty_total NUMERIC NOT NULL DEFAULT 0,
+  total NUMERIC NOT NULL DEFAULT 0,
+  amount_received NUMERIC NOT NULL DEFAULT 0,
+  change_given NUMERIC NOT NULL DEFAULT 0,
+  attendant_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  paid_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Rates table
+CREATE TABLE rates (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  hourly_rate NUMERIC NOT NULL DEFAULT 50,
+  overstay_per_hour NUMERIC NOT NULL DEFAULT 100,
+  no_show_penalty NUMERIC NOT NULL DEFAULT 100,
+  late_cancel_penalty NUMERIC NOT NULL DEFAULT 50,
+  late_cancel_window_minutes INTEGER NOT NULL DEFAULT 30,
+  grace_period_minutes INTEGER NOT NULL DEFAULT 15,
+  updated_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Notifications table
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  type notification_type NOT NULL,
+  is_read BOOLEAN NOT NULL DEFAULT FALSE,
+  related_reservation_id UUID REFERENCES reservations(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Audit log table
+CREATE TABLE audit_log (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  actor_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  details JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_vehicles_owner ON vehicles(owner_id);
+CREATE INDEX idx_reservations_customer ON reservations(customer_id);
+CREATE INDEX idx_reservations_slot ON reservations(slot_id);
+CREATE INDEX idx_reservations_status ON reservations(status);
+CREATE INDEX idx_reservations_time ON reservations(start_time, end_time);
+CREATE INDEX idx_penalties_customer ON penalties(customer_id);
+CREATE INDEX idx_penalties_status ON penalties(status);
+CREATE INDEX idx_notifications_user ON notifications(user_id);
+CREATE INDEX idx_notifications_read ON notifications(is_read);
+CREATE INDEX idx_audit_log_actor ON audit_log(actor_id);
+CREATE INDEX idx_audit_log_created ON audit_log(created_at);
+
+-- Enable Row Level Security
+ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE slots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reservations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE verification_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE penalties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE slots
+  ADD CONSTRAINT slots_current_reservation_fk
+  FOREIGN KEY (current_reservation_id) REFERENCES reservations(id) ON DELETE SET NULL;

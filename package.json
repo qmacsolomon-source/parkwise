@@ -1,0 +1,17 @@
+{
+  "name": "parkwise",
+  "version": "1.0.0",
+  "description": "Shared parking management system with desktop console and mobile app",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "desktop",
+    "mobile"
+  ],
+  "scripts": {
+    "dev:desktop": "cd desktop && npm run dev",
+    "dev:mobile": "cd mobile && npm run dev",
+    "build:desktop": "cd desktop && npm run build",
+    "build:mobile": "cd mobile && npm run build"
+  }
+}

@@ -1,0 +1,221 @@
+import { supabase, isConfigured } from './supabase';
+import { Profile, UserRole } from './types';
+
+export interface AuthState {
+  user: any;
+  profile: Profile | null;
+  loading: boolean;
+}
+
+export interface LoginCredentials {
+  email: string;
+  password: string;
+}
+
+export interface SignupCredentials {
+  email: string;
+  password: string;
+  full_name: string;
+  phone: string;
+  plate_number?: string;
+  pwd_permit_number?: string | null;
+}
+
+export const authService = {
+  // Sign up new user
+  async signup(credentials: SignupCredentials) {
+    if (!supabase || !isConfigured) {
+      throw new Error('Supabase is not configured. Please check your environment variables.');
+    }
+    const { data, error } = await supabase.auth.signUp({
+      email: credentials.email,
+      password: credentials.password,
+      options: {
+        data: {
+          full_name: credentials.full_name,
+          phone: credentials.phone,
+          plate_number: credentials.plate_number,
+          pwd_permit_number: credentials.pwd_permit_number,
+        },
+        emailRedirectTo: undefined,
+      },
+    });
+
+    if (error) throw error;
+    
+    // Create profile entry
+    if (data.user) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: data.user.id,
+          full_name: credentials.full_name,
+          email: credentials.email,
+          phone: credentials.phone,
+          plate_number: credentials.plate_number?.toUpperCase(),
+          pwd_permit_number: credentials.pwd_permit_number || null,
+          role: 'customer',
+          pwd_verified: !!credentials.pwd_permit_number ? false : null,
+          status: !!credentials.pwd_permit_number ? 'pending' : 'active',
+        });
+      
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
+      }
+    }
+    
+    return data;
+  },
+
+  // Register user (alias for signup with customer-specific logic)
+  async register(credentials: SignupCredentials) {
+    return this.signup(credentials);
+  },
+
+  // Sign in user with audit logging
+  async login(credentials: LoginCredentials) {
+    if (!supabase || !isConfigured) {
+      throw new Error('Supabase is not configured. Please check your environment variables.');
+    }
+    // Log login attempt
+    await this.logAudit('login_attempt', {
+      email: credentials.email,
+      timestamp: new Date().toISOString(),
+    });
+
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: credentials.email,
+      password: credentials.password,
+    });
+
+    if (error) {
+      // Log failed login
+      await this.logAudit('login_failed', {
+        email: credentials.email,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      });
+      throw error;
+    }
+
+    // Log successful login
+    await this.logAudit('login_success', {
+      email: credentials.email,
+      user_id: data.user?.id,
+      timestamp: new Date().toISOString(),
+    });
+
+    return data;
+  },
+
+  // Log audit entry
+  async logAudit(action: string, details: any) {
+    if (!supabase || !isConfigured) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('audit_log').insert({
+          actor_id: user.id,
+          action,
+          details,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to log audit entry:', error);
+    }
+  },
+
+  // Sign out user
+  async logout() {
+    if (!supabase || !isConfigured) return;
+    const { error } = await supabase.auth.signOut();
+    if (error) throw error;
+  },
+
+  // Get current session
+  async getSession() {
+    if (!supabase || !isConfigured) return null;
+    const { data: { session }, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    return session;
+  },
+
+  // Get current user
+  async getCurrentUser() {
+    if (!supabase || !isConfigured) return null;
+    const { data: { user }, error } = await supabase.auth.getUser();
+    if (error) throw error;
+    return user;
+  },
+
+  // Get user profile
+  async getProfile(userId: string): Promise<Profile | null> {
+    if (!supabase || !isConfigured) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Profile not found
+      throw error;
+    }
+    return data;
+  },
+
+  // Update user profile
+  async updateProfile(userId: string, updates: Partial<Profile>) {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const { data, error } = await supabase
+      .from('profiles')
+      .update(updates)
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  // Reset password
+  async resetPassword(email: string, redirectTo?: string) {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const redirectUrl = redirectTo || '';
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl,
+    });
+    if (error) throw error;
+  },
+
+  // Update password
+  async updatePassword(newPassword: string) {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const { error } = await supabase.auth.updateUser({
+      password: newPassword,
+    });
+    if (error) throw error;
+  },
+
+  // Listen to auth state changes
+  onAuthStateChange(callback: (event: string, session: any) => void) {
+    if (!supabase || !isConfigured) {
+      return { data: { subscription: { unsubscribe: () => {} } } };
+    }
+    return supabase.auth.onAuthStateChange(callback);
+  },
+
+  // Check if user has specific role
+  async hasRole(userId: string, role: UserRole): Promise<boolean> {
+    const profile = await this.getProfile(userId);
+    return profile?.role === role;
+  },
+
+  // Get user role
+  async getUserRole(userId: string): Promise<UserRole | null> {
+    const profile = await this.getProfile(userId);
+    return profile?.role || null;
+  },
+};
+
+export default authService;

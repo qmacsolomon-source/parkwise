@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# Environment
+.env
+
+# Models
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Logs
+logs/
+*.log
+
+# Test data
+test_images/
+frames/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Evaluation results
+evaluation_results.json
+evaluation_report.txt
