@@ -1,9 +1,33 @@
 -- ParkWise Database Schema
 -- Run this in Supabase SQL Editor
 
--- Enable UUID extension
+-- Enable UUID extensions
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Safely drop existing tables in correct dependency order
+DROP TABLE IF EXISTS audit_log CASCADE;
+DROP TABLE IF EXISTS notifications CASCADE;
+DROP TABLE IF EXISTS rates CASCADE;
+DROP TABLE IF EXISTS payments CASCADE;
+DROP TABLE IF EXISTS penalties CASCADE;
+DROP TABLE IF EXISTS verification_events CASCADE;
+DROP TABLE IF EXISTS agent_states CASCADE;
+DROP TABLE IF EXISTS reservations CASCADE;
+DROP TABLE IF EXISTS slots CASCADE;
+DROP TABLE IF EXISTS vehicles CASCADE;
+DROP TABLE IF EXISTS profiles CASCADE;
+
+-- Safely drop existing custom types
+DROP TYPE IF EXISTS user_role CASCADE;
+DROP TYPE IF EXISTS user_status CASCADE;
+DROP TYPE IF EXISTS slot_status CASCADE;
+DROP TYPE IF EXISTS reservation_status CASCADE;
+DROP TYPE IF EXISTS agent_state CASCADE;
+DROP TYPE IF EXISTS verification_result CASCADE;
+DROP TYPE IF EXISTS penalty_type CASCADE;
+DROP TYPE IF EXISTS payment_status CASCADE;
+DROP TYPE IF EXISTS notification_type CASCADE;
 
 -- Create custom types
 CREATE TYPE user_role AS ENUM ('customer', 'attendant', 'admin');
@@ -125,7 +149,7 @@ CREATE TABLE rates (
   late_cancel_penalty NUMERIC NOT NULL DEFAULT 50,
   late_cancel_window_minutes INTEGER NOT NULL DEFAULT 30,
   grace_period_minutes INTEGER NOT NULL DEFAULT 15,
-  updated_by UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  updated_by UUID REFERENCES profiles(id) ON DELETE CASCADE,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -175,6 +199,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE slots
   ADD CONSTRAINT slots_current_reservation_fk
   FOREIGN KEY (current_reservation_id) REFERENCES reservations(id) ON DELETE SET NULL;

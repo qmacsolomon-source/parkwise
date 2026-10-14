@@ -77,9 +77,9 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 h-full bg-[#0F2A4A] text-white z-50 transition-transform duration-300 ease-in-out ${
+        className={`fixed top-0 left-0 h-screen bg-[#0F2A4A] text-white z-50 transition-transform duration-300 ease-in-out ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0 lg:static lg:z-0 w-64`}
+        } lg:translate-x-0 lg:sticky lg:top-0 lg:z-0 w-64 flex-shrink-0`}
         role="navigation"
         aria-label="Main navigation"
       >

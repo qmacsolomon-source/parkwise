@@ -32,6 +32,7 @@ export default function LiveOccupancyDashboard() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Calculate summary stats
   const stats: SummaryStats = React.useMemo(() => {

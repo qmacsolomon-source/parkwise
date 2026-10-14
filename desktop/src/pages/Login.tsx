@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { LogIn, AlertCircle, Eye, EyeOff, Car } from 'lucide-react';
 import { supabase } from '@parkwise/shared';
+import { useNavigate } from 'react-router-dom';
 
 const LOCKOUT_DURATION = 15 * 60 * 1000; // 15 minutes
 const MAX_ATTEMPTS = 5;
@@ -13,6 +14,7 @@ interface LockoutState {
 }
 
 export default function Login() {
+  const navigate = useNavigate();
   const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -87,6 +89,8 @@ export default function Login() {
       await login(email, password);
       // Successful login - reset attempts
       updateLockout(0, false);
+
+      navigate('/dashboard');
     } catch (err: any) {
       const newAttempts = lockout.attempts + 1;
       if (newAttempts >= MAX_ATTEMPTS) {
@@ -268,7 +272,7 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="input"
-                placeholder="attendant@parkwise.com"
+                placeholder="attendant@gmail.com"
                 required
                 disabled={loading || lockout.isLocked}
                 autoComplete="email"
