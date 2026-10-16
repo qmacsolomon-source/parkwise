@@ -49,6 +49,12 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 3. Copy contents of `database/schema.sql`
 4. Paste and click "Run"
 
+`schema.sql` is safe to re-run later (e.g. after pulling someone else's schema
+change) — it only adds what's missing and will NOT delete existing data. If
+you genuinely need to wipe everything and start over, use
+`database/reset_database.sql` instead (it drops every table first — read its
+warning header before running it).
+
 ### 4.2 Run RLS Policies
 1. Create new query in SQL Editor
 2. Copy contents of `database/rls_policies.sql`
@@ -211,6 +217,10 @@ This will start the Expo development server. You can:
 ### "Profile not found" after login
 - Ensure you ran the seed script with correct User IDs
 - Check that profiles exist in Supabase: Database > profiles table
+- If profiles/reservations/etc. that used to exist are now empty, someone
+  likely ran `reset_database.sql` (or the old destructive `schema.sql`)
+  instead of the current idempotent `schema.sql` — re-create the Auth users'
+  profile rows and re-run `seed.sql`
 
 ### Realtime not working
 - Go to Database > Replication in Supabase

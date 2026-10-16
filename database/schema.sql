@@ -1,47 +1,51 @@
 -- ParkWise Database Schema
--- Run this in Supabase SQL Editor
+-- Run this in Supabase SQL Editor.
+--
+-- Safe to re-run: every statement is idempotent (IF NOT EXISTS / guarded
+-- against "already exists" errors), so applying this again on a database
+-- that already has data will NOT drop or wipe anything. This used to be a
+-- drop-and-recreate script, which deleted all live data (profiles,
+-- reservations, payments, etc.) every time someone re-ran it after a
+-- schema tweak -- that's what reset_database.sql is for now (explicit,
+-- intentional wipes only). For an actual schema change going forward, add
+-- an ALTER TABLE / ALTER TYPE statement below rather than editing a
+-- CREATE TABLE/TYPE block, so re-applying this file keeps existing rows.
 
 -- Enable UUID extensions
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Safely drop existing tables in correct dependency order
-DROP TABLE IF EXISTS audit_log CASCADE;
-DROP TABLE IF EXISTS notifications CASCADE;
-DROP TABLE IF EXISTS rates CASCADE;
-DROP TABLE IF EXISTS payments CASCADE;
-DROP TABLE IF EXISTS penalties CASCADE;
-DROP TABLE IF EXISTS verification_events CASCADE;
-DROP TABLE IF EXISTS agent_states CASCADE;
-DROP TABLE IF EXISTS reservations CASCADE;
-DROP TABLE IF EXISTS slots CASCADE;
-DROP TABLE IF EXISTS vehicles CASCADE;
-DROP TABLE IF EXISTS profiles CASCADE;
-
--- Safely drop existing custom types
-DROP TYPE IF EXISTS user_role CASCADE;
-DROP TYPE IF EXISTS user_status CASCADE;
-DROP TYPE IF EXISTS slot_status CASCADE;
-DROP TYPE IF EXISTS reservation_status CASCADE;
-DROP TYPE IF EXISTS agent_state CASCADE;
-DROP TYPE IF EXISTS verification_result CASCADE;
-DROP TYPE IF EXISTS penalty_type CASCADE;
-DROP TYPE IF EXISTS payment_status CASCADE;
-DROP TYPE IF EXISTS notification_type CASCADE;
-
--- Create custom types
-CREATE TYPE user_role AS ENUM ('customer', 'attendant', 'admin');
-CREATE TYPE user_status AS ENUM ('active', 'disabled');
-CREATE TYPE slot_status AS ENUM ('available', 'reserved', 'occupied', 'unverified', 'overstay', 'maintenance');
-CREATE TYPE reservation_status AS ENUM ('pending', 'active', 'verified', 'completed', 'cancelled', 'no_show', 'overstay');
-CREATE TYPE agent_state AS ENUM ('idle', 'waiting', 'verifying', 'verified', 'alert');
-CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed');
-CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');
-CREATE TYPE payment_status AS ENUM ('unpaid', 'paid');
-CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');
+-- Create custom types (guarded: CREATE TYPE has no native IF NOT EXISTS)
+DO $$ BEGIN
+  CREATE TYPE user_role AS ENUM ('customer', 'attendant', 'admin');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE user_status AS ENUM ('active', 'disabled');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE slot_status AS ENUM ('available', 'reserved', 'occupied', 'unverified', 'overstay', 'maintenance');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE reservation_status AS ENUM ('pending', 'active', 'verified', 'completed', 'cancelled', 'no_show', 'overstay');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE agent_state AS ENUM ('idle', 'waiting', 'verifying', 'verified', 'alert');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE payment_status AS ENUM ('unpaid', 'paid');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN
+  CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 -- Profiles table (linked to auth.users)
-CREATE TABLE profiles (
+CREATE TABLE IF NOT EXISTS profiles (
   id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
@@ -54,7 +58,7 @@ CREATE TABLE profiles (
 );
 
 -- Vehicles table
-CREATE TABLE vehicles (
+CREATE TABLE IF NOT EXISTS vehicles (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   owner_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   plate_number TEXT NOT NULL UNIQUE,
@@ -64,7 +68,7 @@ CREATE TABLE vehicles (
 );
 
 -- Slots table
-CREATE TABLE slots (
+CREATE TABLE IF NOT EXISTS slots (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slot_code TEXT NOT NULL UNIQUE,
   is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
@@ -73,7 +77,7 @@ CREATE TABLE slots (
 );
 
 -- Reservations table
-CREATE TABLE reservations (
+CREATE TABLE IF NOT EXISTS reservations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
@@ -91,7 +95,7 @@ CREATE TABLE reservations (
 );
 
 -- Agent states table (for camera/verification system)
-CREATE TABLE agent_states (
+CREATE TABLE IF NOT EXISTS agent_states (
   slot_id UUID PRIMARY KEY REFERENCES slots(id) ON DELETE CASCADE,
   state agent_state NOT NULL DEFAULT 'idle',
   expected_plate TEXT,
@@ -103,7 +107,7 @@ CREATE TABLE agent_states (
 );
 
 -- Verification events table
-CREATE TABLE verification_events (
+CREATE TABLE IF NOT EXISTS verification_events (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
@@ -116,7 +120,7 @@ CREATE TABLE verification_events (
 );
 
 -- Penalties table
-CREATE TABLE penalties (
+CREATE TABLE IF NOT EXISTS penalties (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
@@ -127,7 +131,7 @@ CREATE TABLE penalties (
 );
 
 -- Payments table
-CREATE TABLE payments (
+CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   base_charge NUMERIC NOT NULL DEFAULT 0,
@@ -141,7 +145,7 @@ CREATE TABLE payments (
 );
 
 -- Rates table
-CREATE TABLE rates (
+CREATE TABLE IF NOT EXISTS rates (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   hourly_rate NUMERIC NOT NULL DEFAULT 50,
   overstay_per_hour NUMERIC NOT NULL DEFAULT 100,
@@ -154,7 +158,7 @@ CREATE TABLE rates (
 );
 
 -- Notifications table
-CREATE TABLE notifications (
+CREATE TABLE IF NOT EXISTS notifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
@@ -166,7 +170,7 @@ CREATE TABLE notifications (
 );
 
 -- Audit log table
-CREATE TABLE audit_log (
+CREATE TABLE IF NOT EXISTS audit_log (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   actor_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   action TEXT NOT NULL,
@@ -174,20 +178,20 @@ CREATE TABLE audit_log (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create indexes for performance
-CREATE INDEX idx_vehicles_owner ON vehicles(owner_id);
-CREATE INDEX idx_reservations_customer ON reservations(customer_id);
-CREATE INDEX idx_reservations_slot ON reservations(slot_id);
-CREATE INDEX idx_reservations_status ON reservations(status);
-CREATE INDEX idx_reservations_time ON reservations(start_time, end_time);
-CREATE INDEX idx_penalties_customer ON penalties(customer_id);
-CREATE INDEX idx_penalties_status ON penalties(status);
-CREATE INDEX idx_notifications_user ON notifications(user_id);
-CREATE INDEX idx_notifications_read ON notifications(is_read);
-CREATE INDEX idx_audit_log_actor ON audit_log(actor_id);
-CREATE INDEX idx_audit_log_created ON audit_log(created_at);
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_vehicles_owner ON vehicles(owner_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_customer ON reservations(customer_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_slot ON reservations(slot_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_status ON reservations(status);
+CREATE INDEX IF NOT EXISTS idx_reservations_time ON reservations(start_time, end_time);
+CREATE INDEX IF NOT EXISTS idx_penalties_customer ON penalties(customer_id);
+CREATE INDEX IF NOT EXISTS idx_penalties_status ON penalties(status);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(is_read);
+CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
 
--- Enable Row Level Security
+-- Enable Row Level Security (idempotent: re-enabling is a no-op)
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE slots ENABLE ROW LEVEL SECURITY;
@@ -200,6 +204,8 @@ ALTER TABLE rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
 
-ALTER TABLE slots
-  ADD CONSTRAINT slots_current_reservation_fk
-  FOREIGN KEY (current_reservation_id) REFERENCES reservations(id) ON DELETE SET NULL;
+DO $$ BEGIN
+  ALTER TABLE slots
+    ADD CONSTRAINT slots_current_reservation_fk
+    FOREIGN KEY (current_reservation_id) REFERENCES reservations(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
