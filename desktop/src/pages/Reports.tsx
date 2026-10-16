@@ -14,8 +14,7 @@ import jsPDF from 'jspdf';
 const COLORS = ['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'];
 
 interface ReportData {
-  revenue: { daily: number[]; weekly: number[]; monthly: number[] };
-  occupancyByHour: { hour: string; rate: number }[];
+  revenue: { daily: { date: string; total: number }[] };
   averageStayDuration: number;
   noShows: number;
   overstays: number;
@@ -93,26 +92,17 @@ export default function Reports() {
         .gte('created_at', from.toISOString())
         .lte('created_at', to.toISOString());
 
-      // Calculate revenue by day
-      const dailyRevenue: number[] = [];
-      const weeklyRevenue: number[] = [];
-      const monthlyRevenue: number[] = [];
-
+      // Calculate revenue by day, sorted chronologically
+      const byDay: Record<string, number> = {};
       if (payments) {
-        const byDay: Record<string, number> = {};
         payments.forEach((p: any) => {
           const day = new Date(p.paid_at).toISOString().split('T')[0];
           byDay[day] = (byDay[day] || 0) + p.total;
         });
-        dailyRevenue.push(...Object.values(byDay));
       }
-
-      // Calculate occupancy by hour
-      const occupancyByHour: { hour: string; rate: number }[] = [];
-      for (let i = 0; i < 24; i++) {
-        const hour = `${i}:00`;
-        occupancyByHour.push({ hour, rate: Math.random() * 100 }); // Placeholder - would need actual slot status history
-      }
+      const dailyRevenue = Object.keys(byDay)
+        .sort()
+        .map((date) => ({ date, total: byDay[date] }));
 
       // Calculate average stay duration
       let totalDuration = 0;
@@ -167,8 +157,7 @@ export default function Reports() {
       }
 
       setReportData({
-        revenue: { daily: dailyRevenue, weekly: weeklyRevenue, monthly: monthlyRevenue },
-        occupancyByHour,
+        revenue: { daily: dailyRevenue },
         averageStayDuration,
         noShows,
         overstays,
@@ -395,36 +384,23 @@ export default function Reports() {
               {/* Revenue Chart */}
               <div className="card">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Daily Revenue</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart data={reportData.revenue.daily.map((val, i) => ({ day: `Day ${i + 1}`, revenue: val }))}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="day" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="revenue" fill="#3b82f6" />
-                  </BarChart>
-                </ResponsiveContainer>
+                {reportData.revenue.daily.length === 0 ? (
+                  <p className="text-sm text-gray-500 py-8 text-center">No payments in this date range</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={reportData.revenue.daily}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="total" name="Revenue" fill="#3b82f6" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
 
-              {/* Occupancy Chart */}
-              <div className="card">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Occupancy Rate by Hour</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <LineChart data={reportData.occupancyByHour}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="hour" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="rate" stroke="#10b981" strokeWidth={2} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            {/* Verification Results */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* Verification Results moved up to fill the grid */}
               <div className="card">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Verification Results</h3>
                 <ResponsiveContainer width="100%" height={300}>
@@ -447,9 +423,11 @@ export default function Reports() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
+            </div>
 
-              {/* Penalties */}
-              <div className="card">
+            {/* Penalties */}
+            <div className="mb-6">
+              <div className="card max-w-md">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Penalties</h3>
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
@@ -498,7 +476,7 @@ export default function Reports() {
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <p className="text-sm text-gray-600">Total Revenue</p>
                   <p className="text-2xl font-bold text-primary">
-                    ${reportData.revenue.daily.reduce((a, b) => a + b, 0).toFixed(2)}
+                    ${reportData.revenue.daily.reduce((sum, d) => sum + d.total, 0).toFixed(2)}
                   </p>
                 </div>
               </div>

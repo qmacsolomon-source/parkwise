@@ -195,8 +195,8 @@ export default function SlotAssignment() {
       await supabase.from('notifications').insert({
         user_id: selectedReservation.customer_id,
         title: 'Slot Reassigned',
-        message: `Your reservation has been moved to slot ${slot.slot_code}`,
-        type: 'info',
+        body: `Your reservation has been moved to slot ${slot.slot_code}`,
+        type: 'system',
       });
 
       // Update agent's expected slot if reservation is active

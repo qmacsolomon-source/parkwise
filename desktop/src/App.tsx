@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { isConfigured } from '@parkwise/shared';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
 import LiveOccupancyDashboard from './pages/LiveOccupancyDashboard';
 import PlateVerification from './pages/PlateVerification';
 import CashPayment from './pages/CashPayment';

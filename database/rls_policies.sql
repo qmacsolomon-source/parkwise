@@ -51,12 +51,14 @@ DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 DROP POLICY IF EXISTS "Attendants can view all profiles" ON profiles;
 DROP POLICY IF EXISTS "Admins can insert profiles" ON profiles;
+DROP POLICY IF EXISTS "Attendants can insert walk-in profiles" ON profiles;
 DROP POLICY IF EXISTS "Admins can update all profiles" ON profiles;
 
 DROP POLICY IF EXISTS "Users can view own vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Users can insert own vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Users can update own vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Attendants can view all vehicles" ON vehicles;
+DROP POLICY IF EXISTS "Attendants can insert vehicles for walk-ins" ON vehicles;
 
 DROP POLICY IF EXISTS "Public can view slots" ON slots;
 DROP POLICY IF EXISTS "Attendants can update slots" ON slots;
@@ -65,6 +67,7 @@ DROP POLICY IF EXISTS "Admins can insert slots" ON slots;
 DROP POLICY IF EXISTS "Users can view own reservations" ON reservations;
 DROP POLICY IF EXISTS "Attendants can view all reservations" ON reservations;
 DROP POLICY IF EXISTS "Users can insert reservations" ON reservations;
+DROP POLICY IF EXISTS "Attendants can insert reservations for walk-ins" ON reservations;
 DROP POLICY IF EXISTS "Users can cancel own reservations" ON reservations;
 DROP POLICY IF EXISTS "Attendants can update reservations" ON reservations;
 
@@ -109,6 +112,12 @@ CREATE POLICY "Attendants can view all profiles" ON profiles
 CREATE POLICY "Admins can insert profiles" ON profiles
   FOR INSERT WITH CHECK (is_admin());
 
+-- Manual Entry lets any attendant register a walk-in customer who has no
+-- profile yet; without this, that insert is silently blocked by RLS and
+-- the whole flow fails.
+CREATE POLICY "Attendants can insert walk-in profiles" ON profiles
+  FOR INSERT WITH CHECK (is_staff() AND role = 'customer');
+
 CREATE POLICY "Admins can update all profiles" ON profiles
   FOR UPDATE USING (is_admin());
 
@@ -124,6 +133,11 @@ CREATE POLICY "Users can update own vehicles" ON vehicles
 
 CREATE POLICY "Attendants can view all vehicles" ON vehicles
   FOR SELECT USING (is_staff());
+
+-- Manual Entry registers the walk-in's vehicle on their behalf, so
+-- owner_id never equals the attendant's own auth.uid().
+CREATE POLICY "Attendants can insert vehicles for walk-ins" ON vehicles
+  FOR INSERT WITH CHECK (is_staff());
 
 -- Slots policies
 CREATE POLICY "Public can view slots" ON slots
@@ -144,6 +158,11 @@ CREATE POLICY "Attendants can view all reservations" ON reservations
 
 CREATE POLICY "Users can insert reservations" ON reservations
   FOR INSERT WITH CHECK (customer_id = auth.uid());
+
+-- Manual Entry creates the reservation under the walk-in customer's id,
+-- not the attendant's, so the self-service policy above doesn't cover it.
+CREATE POLICY "Attendants can insert reservations for walk-ins" ON reservations
+  FOR INSERT WITH CHECK (is_staff());
 
 CREATE POLICY "Users can cancel own reservations" ON reservations
   FOR UPDATE USING (

@@ -88,11 +88,17 @@ CREATE TABLE IF NOT EXISTS reservations (
   booking_code TEXT NOT NULL UNIQUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   cancelled_at TIMESTAMP WITH TIME ZONE,
+  annotation TEXT,
   CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
     slot_id WITH =,
     tstzrange(start_time, end_time) WITH &&
   )
 );
+
+-- annotation existed in the TS types but was never added to the live schema
+-- (table already existed for anyone who ran the old schema.sql), so add it
+-- explicitly for upgrades.
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS annotation TEXT;
 
 -- Agent states table (for camera/verification system)
 CREATE TABLE IF NOT EXISTS agent_states (

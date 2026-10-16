@@ -10,7 +10,6 @@ export default function AccountCreation() {
   const { profile, logout } = useAuth();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
   const [role, setRole] = useState<'attendant' | 'admin'>('attendant');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -56,16 +55,6 @@ export default function AccountCreation() {
       return false;
     }
 
-    if (!username.trim()) {
-      setError('Username is required');
-      return false;
-    }
-
-    if (username.length < 3) {
-      setError('Username must be at least 3 characters');
-      return false;
-    }
-
     if (password.length < 8) {
       setError('Password must be at least 8 characters');
       return false;
@@ -101,29 +90,20 @@ export default function AccountCreation() {
         return;
       }
 
-      // Check for duplicate username
-      const { data: existingUsername } = await supabase
-        .from('profiles')
-        .select('full_name')
-        .eq('full_name', username)
-        .single();
+      // supabase.auth.signUp() overwrites the CURRENT client session with the
+      // newly created user's session (there's no service-role key available
+      // client-side to create the user without doing this). Save the admin's
+      // session first so we can restore it right after, otherwise the admin
+      // gets silently logged out and logged in as the account they just made.
+      const { data: adminSession } = await supabase.auth.getSession();
 
-      if (existingUsername) {
-        setError('This username is already taken');
-        setLoading(false);
-        return;
-      }
-
-      // Create user using Supabase Auth admin API
-      // Note: This requires service role key, which should be handled server-side
-      // For this implementation, we'll use the client-side signup with a flag
+      // Create user using Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.toLowerCase(),
         password: password,
         options: {
           data: {
             full_name: fullName,
-            username: username,
             role: role,
             force_password_change: true,
           },
@@ -154,6 +134,14 @@ export default function AccountCreation() {
           .eq('id', authData.user.id);
       }
 
+      // Restore the admin's own session
+      if (adminSession.session) {
+        await supabase.auth.setSession({
+          access_token: adminSession.session.access_token,
+          refresh_token: adminSession.session.refresh_token,
+        });
+      }
+
       // Log to audit_log
       await supabase.from('audit_log').insert({
         actor_id: adminUser?.id,
@@ -161,7 +149,6 @@ export default function AccountCreation() {
         details: {
           new_user_id: authData.user?.id,
           email: email.toLowerCase(),
-          username: username,
           full_name: fullName,
           role: role,
         },
@@ -175,7 +162,6 @@ export default function AccountCreation() {
       // Reset form
       setFullName('');
       setEmail('');
-      setUsername('');
       setRole('attendant');
       setPassword('');
 
@@ -285,22 +271,6 @@ export default function AccountCreation() {
                 className="input"
                 disabled={loading}
               />
-            </div>
-
-            {/* Username */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Enter username"
-                className="input"
-                disabled={loading}
-              />
-              <p className="text-xs text-gray-500 mt-1">Minimum 3 characters</p>
             </div>
 
             {/* Role */}

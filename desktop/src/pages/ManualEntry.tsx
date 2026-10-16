@@ -4,7 +4,7 @@ import { supabase } from '@parkwise/shared';
 import { Slot } from '@parkwise/shared';
 import {
   FileText, AlertTriangle, CheckCircle, LogOut, Bell,
-  Trash2, Clock, Car, User, Phone, MapPin
+  Trash2, Clock, User, Phone, MapPin
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
@@ -12,18 +12,24 @@ const AGENT_SERVICE_URL = 'http://localhost:8000';
 interface ManualEntry {
   id: string;
   plate: string;
-  vehicleType: string;
   customerName: string | null;
   customerPhone: string | null;
   slot: string;
   slotId: string;
   timeIn: string;
-  duration: number;
+  durationMinutes: number;
   hasPwdPermit: boolean;
-  reason: string;
   attendant: string;
   createdAt: string;
   status: 'active' | 'voided';
+}
+
+function formatDuration(totalMinutes: number): string {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h`;
+  return `${minutes}m`;
 }
 
 export default function ManualEntry() {
@@ -39,14 +45,12 @@ export default function ManualEntry() {
 
   // Form state
   const [plateNumber, setPlateNumber] = useState('');
-  const [vehicleType, setVehicleType] = useState('four_wheeled');
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [selectedSlot, setSelectedSlot] = useState('');
-  const [timeIn, setTimeIn] = useState(new Date().toISOString().slice(0, 16));
-  const [duration, setDuration] = useState(1);
+  const [durationHours, setDurationHours] = useState(1);
+  const [durationMinutes, setDurationMinutes] = useState(0);
   const [hasPwdPermit, setHasPwdPermit] = useState(false);
-  const [reason, setReason] = useState('');
 
   const isAdmin = profile?.role === 'admin';
 
@@ -85,15 +89,13 @@ export default function ManualEntry() {
       const entries: ManualEntry[] = (data || []).map((item: any) => ({
         id: item.id,
         plate: item.details.plate,
-        vehicleType: item.details.vehicle_type,
         customerName: item.details.customer_name || null,
         customerPhone: item.details.customer_phone || null,
         slot: item.details.slot_code,
         slotId: item.details.slot_id,
         timeIn: item.details.time_in,
-        duration: item.details.duration,
+        durationMinutes: item.details.duration_minutes ?? Math.round((item.details.duration || 0) * 60),
         hasPwdPermit: item.details.has_pwd_permit,
-        reason: item.details.reason,
         attendant: item.actor_id,
         createdAt: item.created_at,
         status: item.details.status || 'active',
@@ -123,8 +125,13 @@ export default function ManualEntry() {
       return false;
     }
 
-    if (vehicleType !== 'four_wheeled') {
-      setError('Only four-wheeled vehicles are allowed');
+    if (!customerName.trim()) {
+      setError('Customer name is required');
+      return false;
+    }
+
+    if (customerPhone.replace(/\D/g, '').length !== 11) {
+      setError('Mobile number must be 11 digits');
       return false;
     }
 
@@ -133,12 +140,7 @@ export default function ManualEntry() {
       return false;
     }
 
-    if (!timeIn) {
-      setError('Time in is required');
-      return false;
-    }
-
-    if (duration <= 0) {
+    if (durationHours * 60 + durationMinutes <= 0) {
       setError('Duration must be greater than 0');
       return false;
     }
@@ -149,11 +151,6 @@ export default function ManualEntry() {
         setError('PWD permit is only valid for PWD slots');
         return false;
       }
-    }
-
-    if (!reason.trim()) {
-      setError('Reason is required for manual entry');
-      return false;
     }
 
     return true;
@@ -168,46 +165,33 @@ export default function ManualEntry() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
-      // Create a walk-in customer profile if needed
+      // Find or create the walk-in customer's profile
       let customerId: string;
-      if (customerName && customerPhone) {
-        // Check if customer exists by phone
-        const { data: existingCustomer } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('phone', customerPhone)
-          .single();
+      const { data: existingCustomer } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('phone', customerPhone)
+        .single();
 
-        if (existingCustomer) {
-          customerId = existingCustomer.id;
-        } else {
-          // Create new customer
-          const { data: newCustomer, error: customerError } = await supabase
-            .from('profiles')
-            .insert({
-              full_name: customerName,
-              email: `${customerPhone}@walkin.parkwise.local`,
-              phone: customerPhone,
-              role: 'customer',
-              status: 'active',
-              pwd_permit_number: hasPwdPermit ? 'MANUAL' : null,
-              pwd_verified: hasPwdPermit,
-            })
-            .select()
-            .single();
-
-          if (customerError) throw customerError;
-          customerId = newCustomer.id;
-        }
+      if (existingCustomer) {
+        customerId = existingCustomer.id;
       } else {
-        // Use a generic walk-in customer
-        const { data: genericCustomer } = await supabase
+        const { data: newCustomer, error: customerError } = await supabase
           .from('profiles')
-          .select('*')
-          .eq('email', 'walkin@parkwise.local')
+          .insert({
+            full_name: customerName,
+            email: `${customerPhone}@walkin.parkwise.local`,
+            phone: customerPhone,
+            role: 'customer',
+            status: 'active',
+            pwd_permit_number: hasPwdPermit ? 'MANUAL' : null,
+            pwd_verified: hasPwdPermit,
+          })
+          .select()
           .single();
 
-        customerId = genericCustomer?.id || 'walkin';
+        if (customerError) throw customerError;
+        customerId = newCustomer.id;
       }
 
       // Create vehicle if not exists
@@ -226,7 +210,7 @@ export default function ManualEntry() {
           .insert({
             owner_id: customerId,
             plate_number: plateNumber.toUpperCase(),
-            vehicle_type: vehicleType,
+            vehicle_type: 'four_wheeled',
             is_default: true,
           })
           .select()
@@ -237,8 +221,9 @@ export default function ManualEntry() {
       }
 
       // Calculate end time
-      const startTime = new Date(timeIn);
-      const endTime = new Date(startTime.getTime() + duration * 60 * 60 * 1000);
+      const totalDurationMinutes = durationHours * 60 + durationMinutes;
+      const startTime = new Date();
+      const endTime = new Date(startTime.getTime() + totalDurationMinutes * 60 * 1000);
 
       // Create reservation
       const { data: reservation, error: reservationError } = await supabase
@@ -280,32 +265,29 @@ export default function ManualEntry() {
         action: 'manual_entry',
         details: {
           plate: plateNumber.toUpperCase(),
-          vehicle_type: vehicleType,
+          vehicle_type: 'four_wheeled',
           customer_name: customerName || null,
           customer_phone: customerPhone || null,
           slot_code: slot?.slot_code,
           slot_id: selectedSlot,
-          time_in: timeIn,
-          duration,
+          time_in: startTime.toISOString(),
+          duration_minutes: totalDurationMinutes,
           has_pwd_permit: hasPwdPermit,
-          reason,
           reservation_id: reservation.id,
           status: 'active',
         },
       });
 
       setSuccess(true);
-      
+
       // Reset form
       setPlateNumber('');
-      setVehicleType('four_wheeled');
       setCustomerName('');
       setCustomerPhone('');
       setSelectedSlot('');
-      setTimeIn(new Date().toISOString().slice(0, 16));
-      setDuration(1);
+      setDurationHours(1);
+      setDurationMinutes(0);
       setHasPwdPermit(false);
-      setReason('');
 
       // Reload data
       loadSlots();
@@ -454,27 +436,10 @@ export default function ManualEntry() {
                 <p className="text-xs text-gray-500 mt-1">Format: 3 letters + 3 numbers (e.g., ABC123)</p>
               </div>
 
-              {/* Vehicle Type */}
+              {/* Customer Name */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Vehicle Type <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={vehicleType}
-                  onChange={(e) => setVehicleType(e.target.value)}
-                  className="input"
-                  disabled={saving}
-                >
-                  <option value="four_wheeled">Four-Wheeled</option>
-                  <option value="motorcycle" disabled>Motorcycle (Not Allowed)</option>
-                </select>
-                <p className="text-xs text-red-500 mt-1">Only four-wheeled vehicles are allowed</p>
-              </div>
-
-              {/* Customer Name (Optional) */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer Name <span className="text-gray-400">(Optional)</span>
+                  Customer Name <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -486,10 +451,10 @@ export default function ManualEntry() {
                 />
               </div>
 
-              {/* Customer Phone (Optional) */}
+              {/* Customer Phone */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Customer Phone <span className="text-gray-400">(Optional)</span>
+                  Customer Phone <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="tel"
@@ -499,6 +464,7 @@ export default function ManualEntry() {
                   className="input"
                   disabled={saving}
                 />
+                <p className="text-xs text-gray-500 mt-1">11 digits, e.g. 09171234567</p>
               </div>
 
               {/* Slot Selection */}
@@ -524,34 +490,37 @@ export default function ManualEntry() {
                 )}
               </div>
 
-              {/* Time In */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Time In <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="datetime-local"
-                  value={timeIn}
-                  onChange={(e) => setTimeIn(e.target.value)}
-                  className="input"
-                  disabled={saving}
-                />
-              </div>
-
               {/* Duration */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Expected Duration (hours) <span className="text-red-500">*</span>
+                  Expected Duration <span className="text-red-500">*</span>
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="24"
-                  value={duration}
-                  onChange={(e) => setDuration(parseInt(e.target.value) || 1)}
-                  className="input"
-                  disabled={saving}
-                />
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="24"
+                      value={durationHours}
+                      onChange={(e) => setDurationHours(parseInt(e.target.value) || 0)}
+                      className="input"
+                      disabled={saving}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Hours</p>
+                  </div>
+                  <div className="flex-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="59"
+                      value={durationMinutes}
+                      onChange={(e) => setDurationMinutes(Math.min(59, Math.max(0, parseInt(e.target.value) || 0)))}
+                      className="input"
+                      disabled={saving}
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Minutes</p>
+                  </div>
+                </div>
               </div>
 
               {/* PWD Permit */}
@@ -567,20 +536,6 @@ export default function ManualEntry() {
                 <label htmlFor="pwdPermit" className="text-sm text-gray-700">
                   PWD Permit (Only for PWD slots)
                 </label>
-              </div>
-
-              {/* Reason */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Reason <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Explain why manual entry is needed..."
-                  className="input w-full h-24"
-                  disabled={saving}
-                />
               </div>
 
               {/* Submit Button */}
@@ -635,10 +590,6 @@ export default function ManualEntry() {
                     </div>
                     
                     <div className="text-sm text-gray-600 space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Car size={14} />
-                        <span>{entry.vehicleType}</span>
-                      </div>
                       {entry.customerName && (
                         <div className="flex items-center gap-2">
                           <User size={14} />
@@ -657,17 +608,13 @@ export default function ManualEntry() {
                       </div>
                       <div className="flex items-center gap-2">
                         <MapPin size={14} />
-                        <span>{entry.duration} hours</span>
+                        <span>{formatDuration(entry.durationMinutes)}</span>
                       </div>
                       {entry.hasPwdPermit && (
                         <span className="text-xs bg-purple-100 text-purple-800 px-2 py-0.5 rounded">
                           PWD Permit
                         </span>
                       )}
-                    </div>
-
-                    <div className="mt-2 pt-2 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 italic">Reason: {entry.reason}</p>
                     </div>
 
                     {isAdmin && entry.status === 'active' && (

@@ -18,7 +18,7 @@ interface SummaryStats {
 }
 
 export default function LiveOccupancyDashboard() {
-  const { profile } = useAuth();
+  const { profile, logout } = useAuth();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [reservations, setReservations] = useState<Record<string, Reservation>>({});

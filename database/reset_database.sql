@@ -100,6 +100,7 @@ CREATE TABLE reservations (
   booking_code TEXT NOT NULL UNIQUE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   cancelled_at TIMESTAMP WITH TIME ZONE,
+  annotation TEXT,
   CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
     slot_id WITH =,
     tstzrange(start_time, end_time) WITH &&

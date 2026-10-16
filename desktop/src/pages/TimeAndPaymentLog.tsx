@@ -37,6 +37,7 @@ export default function TimeAndPaymentLog() {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
+  const [totalCount, setTotalCount] = useState(0);
   
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
   const [showDrawer, setShowDrawer] = useState(false);
@@ -61,11 +62,11 @@ export default function TimeAndPaymentLog() {
         .from('reservations')
         .select(`
           *,
-          payments(*),
+          payments(*, attendant:profiles!payments_attendant_id_fkey(full_name)),
           profiles!reservations_customer_id_fkey(*),
           vehicles!reservations_vehicle_id_fkey(*),
           slots!reservations_slot_id_fkey(*)
-        `)
+        `, { count: 'exact' })
         .in('status', ['completed', 'cancelled', 'no_show']);
 
       // Apply date range filter
@@ -102,18 +103,20 @@ export default function TimeAndPaymentLog() {
       const to = from + pageSize - 1;
       query = query.range(from, to);
 
-      const { data, error } = await query;
+      const { data, error, count } = await query;
 
       if (error) throw error;
+
+      setTotalCount(count || 0);
 
       // Transform data to log entries
       const logEntries: LogEntry[] = (data || []).map((item: any) => {
         const reservation = item as Reservation;
-        const payment = item.payments as Payment | null;
+        const payment = item.payments as (Payment & { attendant?: { full_name: string } }) | null;
         const customer = item.profiles as Profile;
         const vehicle = item.vehicles as Vehicle;
         const slot = item.slots as Slot;
-        const attendant = payment ? null : 'N/A';
+        const attendant = payment?.attendant?.full_name || null;
 
         const startTime = new Date(reservation.start_time);
         const endTime = reservation.end_time ? new Date(reservation.end_time) : null;
@@ -235,7 +238,7 @@ export default function TimeAndPaymentLog() {
     setShowLogoutModal(false);
   };
 
-  const totalPages = Math.ceil(100 / pageSize); // Simplified, should get actual count
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   return (
     <div className="min-h-screen bg-background">
@@ -422,7 +425,7 @@ export default function TimeAndPaymentLog() {
                     <td className="px-4 py-3 text-sm text-right font-bold">
                       ${entry.total.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-sm">{entry.attendant}</td>
+                    <td className="px-4 py-3 text-sm">{entry.attendant || '-'}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-1 rounded text-xs font-medium ${
                         entry.status === 'completed' ? 'bg-green-100 text-green-800' :

@@ -94,7 +94,7 @@ export default function UserManagement() {
             .from('audit_log')
             .select('created_at')
             .eq('actor_id', p.id)
-            .eq('action', 'login')
+            .eq('action', 'login_success')
             .order('created_at', { ascending: false })
             .limit(1)
             .single();
