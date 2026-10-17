@@ -252,14 +252,23 @@ export default function RatesAndPricing() {
   const calculatePreview = (): string => {
     const hourly = parseFloat(formRates.hourly_rate) || 0;
     const overstay = parseFloat(formRates.overstay_per_hour) || 0;
+    const gracePeriodMinutes = parseFloat(formRates.grace_period_minutes) || 0;
     const hours = 2;
     const overstayMinutes = 30;
-    const overstayHours = overstayMinutes / 60;
-    
+
+    // Mirrors calculate_payment() in database/business_rules.sql:
+    // overstay only charged once elapsed time exceeds the grace period, and the
+    // charge is CEIL(overstay_hours) * overstay_per_hour (hour-counting starts at
+    // end_time, not after the grace period).
+    let overstayCharge = 0;
+    if (overstayMinutes > gracePeriodMinutes) {
+      const overstayHours = overstayMinutes / 60;
+      overstayCharge = Math.ceil(overstayHours) * overstay;
+    }
+
     const baseCharge = hours * hourly;
-    const overstayCharge = overstayHours * overstay;
     const total = baseCharge + overstayCharge;
-    
+
     return `2 hours + 30 min overstay = ₱${total.toFixed(2)}`;
   };
 

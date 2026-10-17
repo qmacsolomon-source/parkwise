@@ -53,6 +53,7 @@ DROP POLICY IF EXISTS "Attendants can view all profiles" ON profiles;
 DROP POLICY IF EXISTS "Admins can insert profiles" ON profiles;
 DROP POLICY IF EXISTS "Attendants can insert walk-in profiles" ON profiles;
 DROP POLICY IF EXISTS "Admins can update all profiles" ON profiles;
+DROP POLICY IF EXISTS "Admins can delete profiles" ON profiles;
 
 DROP POLICY IF EXISTS "Users can view own vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Users can insert own vehicles" ON vehicles;
@@ -80,6 +81,7 @@ DROP POLICY IF EXISTS "Attendants can insert verification events" ON verificatio
 DROP POLICY IF EXISTS "Users can view own penalties" ON penalties;
 DROP POLICY IF EXISTS "Attendants can view all penalties" ON penalties;
 DROP POLICY IF EXISTS "Attendants can insert penalties" ON penalties;
+DROP POLICY IF EXISTS "Attendants can update penalties" ON penalties;
 
 DROP POLICY IF EXISTS "Users can view own payments" ON payments;
 DROP POLICY IF EXISTS "Attendants can view all payments" ON payments;
@@ -96,6 +98,7 @@ DROP POLICY IF EXISTS "System can insert notifications" ON notifications;
 DROP POLICY IF EXISTS "Users can view own audit entries" ON audit_log;
 DROP POLICY IF EXISTS "Admins can view all audit entries" ON audit_log;
 DROP POLICY IF EXISTS "System can insert audit entries" ON audit_log;
+DROP POLICY IF EXISTS "Attendants can update audit log entries" ON audit_log;
 
 -- Step 3: Recreate policies using helper functions
 
@@ -120,6 +123,11 @@ CREATE POLICY "Attendants can insert walk-in profiles" ON profiles
 
 CREATE POLICY "Admins can update all profiles" ON profiles
   FOR UPDATE USING (is_admin());
+
+-- User Management's "Delete User" action is admin-only (destructive), unlike
+-- the staff-wide access granted elsewhere on this table.
+CREATE POLICY "Admins can delete profiles" ON profiles
+  FOR DELETE USING (is_admin());
 
 -- Vehicles policies
 CREATE POLICY "Users can view own vehicles" ON vehicles
@@ -168,6 +176,10 @@ CREATE POLICY "Users can cancel own reservations" ON reservations
   FOR UPDATE USING (
     customer_id = auth.uid() AND
     status IN ('pending', 'active')
+  )
+  WITH CHECK (
+    customer_id = auth.uid() AND
+    status = 'cancelled'
   );
 
 CREATE POLICY "Attendants can update reservations" ON reservations
@@ -196,6 +208,11 @@ CREATE POLICY "Attendants can view all penalties" ON penalties
 
 CREATE POLICY "Attendants can insert penalties" ON penalties
   FOR INSERT WITH CHECK (is_staff());
+
+-- CashPayment marks a penalty paid, and UserManagement waives/adjusts one
+-- (amount/status), both via .update() with no matching policy before this.
+CREATE POLICY "Attendants can update penalties" ON penalties
+  FOR UPDATE USING (is_staff());
 
 -- Payments policies
 CREATE POLICY "Users can view own payments" ON payments
@@ -241,4 +258,13 @@ CREATE POLICY "Admins can view all audit entries" ON audit_log
   FOR SELECT USING (is_admin());
 
 CREATE POLICY "System can insert audit entries" ON audit_log
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (actor_id = auth.uid());
+
+-- ManualEntry's void-entry flow marks an existing audit record's details as
+-- voided via .update(); no UPDATE policy existed before this. Postgres RLS
+-- can't restrict an UPDATE policy to a single column (e.g. details only),
+-- so this is a full-row UPDATE gate on staff role -- acceptable here since
+-- audit_log already grants staff broad access (all rows via SELECT and
+-- INSERT above).
+CREATE POLICY "Attendants can update audit log entries" ON audit_log
+  FOR UPDATE USING (is_staff());

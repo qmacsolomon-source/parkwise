@@ -50,10 +50,15 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-    setShowLogoutModal(false);
+  const handleLogout = async () => {
+    try {
+      await logout();
+      navigate('/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    } finally {
+      setShowLogoutModal(false);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, path: string) => {

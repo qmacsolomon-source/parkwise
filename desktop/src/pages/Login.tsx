@@ -26,19 +26,29 @@ export default function Login() {
   const [resetEmail, setResetEmail] = useState('');
   const [showResetForm, setShowResetForm] = useState(false);
 
-  // Load lockout state from localStorage
+  const getLockoutKey = (emailValue: string) => `login_lockout_${emailValue.trim().toLowerCase()}`;
+
+  // Load lockout state from localStorage, scoped to the email being attempted
   useEffect(() => {
-    const stored = localStorage.getItem('login_lockout');
+    if (!email) {
+      setLockout({ isLocked: false, attempts: 0, lockUntil: null });
+      return;
+    }
+    const key = getLockoutKey(email);
+    const stored = localStorage.getItem(key);
     if (stored) {
       const parsed = JSON.parse(stored);
       const now = Date.now();
       if (parsed.lockUntil && parsed.lockUntil > now) {
         setLockout(parsed);
       } else {
-        localStorage.removeItem('login_lockout');
+        localStorage.removeItem(key);
+        setLockout({ isLocked: false, attempts: 0, lockUntil: null });
       }
+    } else {
+      setLockout({ isLocked: false, attempts: 0, lockUntil: null });
     }
-  }, []);
+  }, [email]);
 
   const updateLockout = (attempts: number, isLocked: boolean = false) => {
     const newState: LockoutState = {
@@ -47,12 +57,13 @@ export default function Login() {
       lockUntil: isLocked ? Date.now() + LOCKOUT_DURATION : null,
     };
     setLockout(newState);
+    const key = getLockoutKey(email);
     if (isLocked) {
-      localStorage.setItem('login_lockout', JSON.stringify(newState));
+      localStorage.setItem(key, JSON.stringify(newState));
     } else if (attempts === 0) {
-      localStorage.removeItem('login_lockout');
+      localStorage.removeItem(key);
     } else {
-      localStorage.setItem('login_lockout', JSON.stringify(newState));
+      localStorage.setItem(key, JSON.stringify(newState));
     }
   };
 
@@ -90,7 +101,7 @@ export default function Login() {
       // Successful login - reset attempts
       updateLockout(0, false);
 
-      navigate('/dashboard');
+      navigate('/');
     } catch (err: any) {
       const newAttempts = lockout.attempts + 1;
       if (newAttempts >= MAX_ATTEMPTS) {

@@ -55,12 +55,13 @@ export const authService = {
           plate_number: credentials.plate_number?.toUpperCase(),
           pwd_permit_number: credentials.pwd_permit_number || null,
           role: 'customer',
-          pwd_verified: !!credentials.pwd_permit_number ? false : null,
-          status: !!credentials.pwd_permit_number ? 'pending' : 'active',
+          pwd_verified: false,
+          status: 'active',
         });
-      
+
       if (profileError) {
         console.error('Profile creation error:', profileError);
+        throw profileError;
       }
     }
     

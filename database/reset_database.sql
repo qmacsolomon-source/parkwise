@@ -107,7 +107,7 @@ CREATE TABLE reservations (
   CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
     slot_id WITH =,
     tstzrange(start_time, end_time) WITH &&
-  )
+  ) WHERE (status NOT IN ('cancelled', 'completed', 'no_show'))
 );
 
 -- Agent states table (for camera/verification system)

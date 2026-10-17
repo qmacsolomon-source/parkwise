@@ -13,7 +13,7 @@ const statusConfig: Record<string, { label: string; className: string; icon: any
   occupied: { label: 'Occupied', className: 'status-verified', icon: CheckCircle },
   unverified: { label: 'Unverified', className: 'status-unverified', icon: AlertCircle },
   overstay: { label: 'Overstay', className: 'status-overstay', icon: XCircle },
-  maintenance: { label: 'Maintenance', className: 'status-available', icon: AlertCircle },
+  maintenance: { label: 'Maintenance', className: 'status-maintenance', icon: AlertCircle },
   
   // Reservation statuses
   pending: { label: 'Pending', className: 'status-pending', icon: Clock },

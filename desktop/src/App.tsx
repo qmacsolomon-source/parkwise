@@ -2,6 +2,7 @@ import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { isConfigured } from '@parkwise/shared';
+import type { UserRole } from '@parkwise/shared';
 import Login from './pages/Login';
 import LiveOccupancyDashboard from './pages/LiveOccupancyDashboard';
 import PlateVerification from './pages/PlateVerification';
@@ -102,8 +103,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
 
-  // Role-based routing
-  if (profile?.role === 'customer') {
+  // Role-based routing: allowlist attendant/admin only. No profile (e.g. the
+  // signup bug that leaves a user with zero profile data), role === 'customer',
+  // or any unrecognized role are all denied access.
+  const allowedRoles: UserRole[] = ['attendant', 'admin'];
+  if (!profile || !allowedRoles.includes(profile.role)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-4">
         <div className="card max-w-md w-full text-center">

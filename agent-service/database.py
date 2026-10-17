@@ -23,7 +23,7 @@ class Database:
     async def get_slot(cls, slot_id: str):
         """Get slot by ID."""
         client = cls.get_client()
-        response = client.table('slots').select('*').eq('id', slot_id).single()
+        response = client.table('slots').select('*').eq('id', slot_id).single().execute()
         if response.data:
             return response.data
         return None
@@ -32,7 +32,7 @@ class Database:
     async def get_agent_state(cls, slot_id: str):
         """Get agent state for slot."""
         client = cls.get_client()
-        response = client.table('agent_states').select('*').eq('slot_id', slot_id).single()
+        response = client.table('agent_states').select('*').eq('slot_id', slot_id).single().execute()
         if response.data:
             return response.data
         return None
@@ -41,7 +41,7 @@ class Database:
     async def update_agent_state(cls, slot_id: str, updates: dict):
         """Update agent state."""
         client = cls.get_client()
-        response = client.table('agent_states').update(updates).eq('slot_id', slot_id)
+        response = client.table('agent_states').update(updates).eq('slot_id', slot_id).execute()
         logger.info("Agent state updated", slot_id=slot_id, updates=updates)
         return response.data
     
@@ -52,7 +52,7 @@ class Database:
         updates = {'status': status}
         if reservation_id:
             updates['current_reservation_id'] = reservation_id
-        response = client.table('slots').update(updates).eq('id', slot_id)
+        response = client.table('slots').update(updates).eq('id', slot_id).execute()
         logger.info("Slot status updated", slot_id=slot_id, status=status)
         return response.data
     
@@ -60,7 +60,7 @@ class Database:
     async def get_active_reservation(cls, slot_id: str):
         """Get active reservation for slot."""
         client = cls.get_client()
-        response = client.table('reservations').select('*').eq('slot_id', slot_id).eq('status', 'active').single()
+        response = client.table('reservations').select('*').eq('slot_id', slot_id).eq('status', 'active').single().execute()
         if response.data:
             return response.data
         return None
@@ -69,7 +69,7 @@ class Database:
     async def update_reservation_status(cls, reservation_id: str, status: str):
         """Update reservation status."""
         client = cls.get_client()
-        response = client.table('reservations').update({'status': status}).eq('id', reservation_id)
+        response = client.table('reservations').update({'status': status}).eq('id', reservation_id).execute()
         logger.info("Reservation status updated", reservation_id=reservation_id, status=status)
         return response.data
     
@@ -88,7 +88,7 @@ class Database:
             'result': result,
             'frame_url': frame_url
         }
-        response = client.table('verification_events').insert(data)
+        response = client.table('verification_events').insert(data).execute()
         logger.info("Verification event created", slot_id=slot_id, result=result)
         return response.data
     
@@ -96,7 +96,7 @@ class Database:
     async def get_profile(cls, user_id: str):
         """Get user profile."""
         client = cls.get_client()
-        response = client.table('profiles').select('*').eq('id', user_id).single()
+        response = client.table('profiles').select('*').eq('id', user_id).single().execute()
         if response.data:
             return response.data
         return None
@@ -105,7 +105,7 @@ class Database:
     async def get_vehicle(cls, plate_number: str):
         """Get vehicle by plate number."""
         client = cls.get_client()
-        response = client.table('vehicles').select('*').eq('plate_number', plate_number).single()
+        response = client.table('vehicles').select('*').eq('plate_number', plate_number).single().execute()
         if response.data:
             return response.data
         return None
@@ -114,7 +114,7 @@ class Database:
     async def get_rates(cls):
         """Get current rates."""
         client = cls.get_client()
-        response = client.table('rates').select('*').order('updated_at', desc=True).limit(1).single()
+        response = client.table('rates').select('*').order('updated_at', desc=True).limit(1).single().execute()
         if response.data:
             return response.data
         return None

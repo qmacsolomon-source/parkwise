@@ -97,7 +97,7 @@ CREATE TABLE IF NOT EXISTS reservations (
   CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
     slot_id WITH =,
     tstzrange(start_time, end_time) WITH &&
-  )
+  ) WHERE (status NOT IN ('cancelled', 'completed', 'no_show'))
 );
 
 -- annotation existed in the TS types but was never added to the live schema

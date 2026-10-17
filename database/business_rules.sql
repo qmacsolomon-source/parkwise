@@ -216,6 +216,59 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Trigger: Create a penalty row when a reservation transitions into a
+-- penalty-worthy status. Previously nothing ever inserted into `penalties`
+-- even though notify_reservation_status_change() told customers "a penalty
+-- has been applied" on no_show/overstay -- this is what actually applies it.
+-- Each penalty type fires at most once per reservation (guarded by a
+-- NOT EXISTS check against `penalties`, not just OLD/NEW status, so a later
+-- unrelated UPDATE on the same row can never insert a duplicate).
+CREATE OR REPLACE FUNCTION create_penalty_on_status_change()
+RETURNS TRIGGER AS $$
+DECLARE
+  rate RECORD;
+BEGIN
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    SELECT * INTO rate FROM rates ORDER BY updated_at DESC LIMIT 1;
+
+    IF NEW.status = 'no_show' THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM penalties WHERE reservation_id = NEW.id AND type = 'no_show'
+      ) THEN
+        INSERT INTO penalties (customer_id, reservation_id, type, amount)
+        VALUES (NEW.customer_id, NEW.id, 'no_show', rate.no_show_penalty);
+      END IF;
+
+    ELSIF NEW.status = 'overstay' THEN
+      IF NOT EXISTS (
+        SELECT 1 FROM penalties WHERE reservation_id = NEW.id AND type = 'overstay'
+      ) THEN
+        -- Flat, one-time charge for symmetry with no_show/late_cancel below.
+        -- This is a SEPARATE line item from the metered, per-hour
+        -- overstay_surcharge computed in calculate_payment(); rates has no
+        -- dedicated flat "overstay_penalty" column, so overstay_per_hour is
+        -- reused here as that flat amount. See report for the ambiguity this
+        -- creates (possible double charge against the same overstay event).
+        INSERT INTO penalties (customer_id, reservation_id, type, amount)
+        VALUES (NEW.customer_id, NEW.id, 'overstay', rate.overstay_per_hour);
+      END IF;
+
+    ELSIF NEW.status = 'cancelled' AND OLD.status IN ('active', 'pending') THEN
+      -- Late cancel: cancelling at or after (start_time - window) counts as late.
+      IF NOW() > (NEW.start_time - (rate.late_cancel_window_minutes * INTERVAL '1 minute')) THEN
+        IF NOT EXISTS (
+          SELECT 1 FROM penalties WHERE reservation_id = NEW.id AND type = 'late_cancel'
+        ) THEN
+          INSERT INTO penalties (customer_id, reservation_id, type, amount)
+          VALUES (NEW.customer_id, NEW.id, 'late_cancel', rate.late_cancel_penalty);
+        END IF;
+      END IF;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Trigger: Log audit on reservation changes
 CREATE OR REPLACE FUNCTION audit_reservation_changes()
 RETURNS TRIGGER AS $$
@@ -275,37 +328,54 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Apply triggers
+--
+-- Each is preceded by DROP TRIGGER IF EXISTS so this whole file can be safely
+-- re-run after a schema tweak (same idempotent convention as schema.sql),
+-- instead of erroring out on "trigger already exists" at the first one.
 
 -- Reservation triggers
+DROP TRIGGER IF EXISTS trg_reservation_check_penalties ON reservations;
 CREATE TRIGGER trg_reservation_check_penalties
   BEFORE INSERT ON reservations
   FOR EACH ROW EXECUTE FUNCTION check_unpaid_penalties();
 
+DROP TRIGGER IF EXISTS trg_reservation_check_pwd ON reservations;
 CREATE TRIGGER trg_reservation_check_pwd
   BEFORE INSERT OR UPDATE ON reservations
   FOR EACH ROW EXECUTE FUNCTION check_pwd_slot_access();
 
+DROP TRIGGER IF EXISTS trg_reservation_set_booking_code ON reservations;
 CREATE TRIGGER trg_reservation_set_booking_code
   BEFORE INSERT ON reservations
   FOR EACH ROW EXECUTE FUNCTION set_booking_code();
 
+DROP TRIGGER IF EXISTS trg_reservation_update_slot ON reservations;
 CREATE TRIGGER trg_reservation_update_slot
   AFTER INSERT OR UPDATE OR DELETE ON reservations
   FOR EACH ROW EXECUTE FUNCTION update_slot_status();
 
+DROP TRIGGER IF EXISTS trg_reservation_notify_created ON reservations;
 CREATE TRIGGER trg_reservation_notify_created
   AFTER INSERT ON reservations
   FOR EACH ROW EXECUTE FUNCTION notify_reservation_created();
 
+DROP TRIGGER IF EXISTS trg_reservation_notify_status ON reservations;
 CREATE TRIGGER trg_reservation_notify_status
   AFTER UPDATE ON reservations
   FOR EACH ROW EXECUTE FUNCTION notify_reservation_status_change();
 
+DROP TRIGGER IF EXISTS trg_reservation_create_penalty ON reservations;
+CREATE TRIGGER trg_reservation_create_penalty
+  AFTER UPDATE ON reservations
+  FOR EACH ROW EXECUTE FUNCTION create_penalty_on_status_change();
+
+DROP TRIGGER IF EXISTS trg_reservation_audit ON reservations;
 CREATE TRIGGER trg_reservation_audit
   AFTER INSERT OR UPDATE OR DELETE ON reservations
   FOR EACH ROW EXECUTE FUNCTION audit_reservation_changes();
 
 -- Payment triggers
+DROP TRIGGER IF EXISTS trg_payment_audit ON payments;
 CREATE TRIGGER trg_payment_audit
   AFTER INSERT ON payments
   FOR EACH ROW EXECUTE FUNCTION audit_payment_created();
@@ -366,9 +436,16 @@ BEGIN
   overstay_hours := 0;
   overstay_surcharge := 0;
   IF res.status = 'overstay' THEN
-    -- Assume overstay is calculated from end_time to current time
-    overstay_hours := EXTRACT(EPOCH FROM (NOW() - res.end_time)) / 3600;
-    overstay_surcharge := CEIL(overstay_hours) * rate.overstay_per_hour;
+    -- Grace period: rates.grace_period_minutes is how many minutes past
+    -- end_time are free before overstay billing starts. Previously this
+    -- was not applied at all (overstay_hours counted from end_time with no
+    -- gate, while a hardcoded 60-second value lived only in agent-service
+    -- config, unrelated to this admin-editable setting).
+    IF NOW() > (res.end_time + (rate.grace_period_minutes * INTERVAL '1 minute')) THEN
+      -- Assume overstay is calculated from end_time to current time
+      overstay_hours := EXTRACT(EPOCH FROM (NOW() - res.end_time)) / 3600;
+      overstay_surcharge := CEIL(overstay_hours) * rate.overstay_per_hour;
+    END IF;
   END IF;
   
   -- Calculate penalties

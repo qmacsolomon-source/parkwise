@@ -22,14 +22,14 @@ class AgentManager:
         
         # Get all slots from database
         client = Database.get_client()
-        response = client.table('slots').select('*')
-        
+        response = client.table('slots').select('*').execute()
+
         if response.data:
             for slot in response.data:
                 slot_id = slot['id']
                 agent = SlotAgent(slot_id)
                 await agent.initialize()
-                self.agents[slot_id] = slot_id
+                self.agents[slot_id] = agent
                 logger.info("Agent initialized", slot_id=slot_id)
         
         logger.info("AgentManager initialized", agent_count=len(self.agents))
