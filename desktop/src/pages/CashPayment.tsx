@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Rate, Penalty, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -21,6 +22,7 @@ interface PaymentCalculation {
 
 export default function CashPayment() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const location = useLocation();
   const pendingReservationId = useRef<string | null>(
     (location.state as { reservationId?: string } | null)?.reservationId ?? null
@@ -181,6 +183,22 @@ export default function CashPayment() {
     if (isNaN(received) || received < calculation.total) {
       setError('Amount received must be at least the total');
       return;
+    }
+
+    // The reserved time hasn't actually run out yet -- the attendant can
+    // still choose to pay and release the slot early (the customer leaving
+    // ahead of schedule is legitimate), but make them confirm it rather
+    // than let it happen as a casual misclick, since the slot becomes
+    // available for someone else the moment this goes through.
+    const endTime = new Date(selectedReservation.end_time);
+    const now = new Date();
+    if (now < endTime) {
+      const minutesLeft = Math.ceil((endTime.getTime() - now.getTime()) / 60000);
+      const proceed = await dialog.confirm(
+        `This reservation's reserved time hasn't ended yet -- about ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'} remaining. Paying now will release the slot early. Continue anyway?`,
+        'Reserved Time Not Over Yet'
+      );
+      if (!proceed) return;
     }
 
     setProcessing(true);
