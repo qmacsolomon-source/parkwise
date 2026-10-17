@@ -313,7 +313,27 @@ export default function ManualEntry() {
   };
 
   const handleVoidEntry = async (entry: ManualEntry) => {
-    if (!(await dialog.confirm('Are you sure you want to void this manual entry?'))) return;
+    // Void exists to undo an immediate mistake (wrong plate typed, wrong
+    // slot picked), not to end an active parking session -- doing that
+    // releases the slot with no payment collected and no record of the
+    // time used, which is never the intended flow (use Cash Payment for
+    // that). It can't be outright blocked -- genuine mistakes do happen,
+    // even minutes later -- so once the entry has been sitting long enough
+    // that a car is almost certainly actually parked there, make it much
+    // harder to do by accident instead of a generic "are you sure?".
+    const minutesSinceEntry = (Date.now() - new Date(entry.timeIn).getTime()) / 60000;
+    const VOID_GRACE_PERIOD_MINUTES = 5;
+
+    if (minutesSinceEntry > VOID_GRACE_PERIOD_MINUTES) {
+      const confirmed = await dialog.confirm(
+        `This vehicle checked in ${Math.round(minutesSinceEntry)} minutes ago and is very likely still parked in ${entry.slot} right now. Voiding it will immediately free the slot with NO PAYMENT collected and no record this ever happened -- this is not how a normal parking session should end; use Cash Payment for that instead.\n\nOnly continue if this entry genuinely needs to be erased.`,
+        'This Looks Like An Active Session, Not A Mistake',
+        { confirmLabel: 'Void Anyway', danger: true }
+      );
+      if (!confirmed) return;
+    } else {
+      if (!(await dialog.confirm('Are you sure you want to void this manual entry?'))) return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();

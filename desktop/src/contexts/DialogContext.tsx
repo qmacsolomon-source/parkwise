@@ -1,6 +1,18 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 
-interface DialogState {
+interface ConfirmOptions {
+  // Overrides the confirm button's label (default "Confirm") - use this to
+  // name the actual consequence (e.g. "Void Anyway") instead of a generic
+  // word, for actions serious enough that the button itself should make
+  // the person stop and read it.
+  confirmLabel?: string;
+  // Styles the confirm button red instead of the default navy, matching
+  // the destructive-action color already used elsewhere (Sidebar's
+  // Logout, User Management's Delete).
+  danger?: boolean;
+}
+
+interface DialogState extends ConfirmOptions {
   kind: 'alert' | 'confirm';
   title: string;
   message: string;
@@ -9,7 +21,7 @@ interface DialogState {
 
 interface DialogContextValue {
   alert: (message: string, title?: string) => Promise<void>;
-  confirm: (message: string, title?: string) => Promise<boolean>;
+  confirm: (message: string, title?: string, options?: ConfirmOptions) => Promise<boolean>;
 }
 
 const DialogContext = createContext<DialogContextValue | undefined>(undefined);
@@ -30,10 +42,10 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const confirm = useCallback((message: string, title = 'Please Confirm') => {
+  const confirm = useCallback((message: string, title = 'Please Confirm', options?: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;
-      setDialog({ kind: 'confirm', title, message, resolve });
+      setDialog({ kind: 'confirm', title, message, resolve, ...options });
     });
   }, []);
 
@@ -73,10 +85,14 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
               )}
               <button
                 onClick={() => close(true)}
-                className="px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary-light transition-colors"
+                className={`px-4 py-2 rounded-lg text-white transition-colors ${
+                  dialog.kind === 'confirm' && dialog.danger
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-primary hover:bg-primary-light'
+                }`}
                 autoFocus={dialog.kind === 'alert'}
               >
-                {dialog.kind === 'confirm' ? 'Confirm' : 'OK'}
+                {dialog.kind === 'confirm' ? (dialog.confirmLabel || 'Confirm') : 'OK'}
               </button>
             </div>
           </div>
