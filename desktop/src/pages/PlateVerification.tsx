@@ -32,7 +32,11 @@ export default function PlateVerification() {
   const [flagReason, setFlagReason] = useState('');
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+  // Accept/Override/Flag only ever surfaced feedback on failure - a
+  // successful action closed its modal and just... didn't say anything,
+  // leaving the attendant to guess whether it actually worked.
+  const [successMessage, setSuccessMessage] = useState('');
+
   const [gracePeriodRemaining, setGracePeriodRemaining] = useState<number>(0);
 
   // Load initial data
@@ -161,6 +165,8 @@ export default function PlateVerification() {
 
       // Update local state
       setSelectedReservation(null);
+      setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error accepting vehicle:', error);
@@ -177,6 +183,8 @@ export default function PlateVerification() {
     try {
       // Trigger camera capture via agent service
       await fetch(`${AGENT_SERVICE_URL}/beam/${selectedSlot.id}`, { method: 'POST' });
+      setSuccessMessage('Capture retry triggered.');
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error retrying capture:', error);
@@ -208,6 +216,8 @@ export default function PlateVerification() {
 
       setShowManualOverride(false);
       setOverrideReason('');
+      setSuccessMessage(`Manual override recorded for slot ${selectedSlot?.slot_code}.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error with manual override:', error);
@@ -244,6 +254,8 @@ export default function PlateVerification() {
 
       setShowFlagModal(false);
       setFlagReason('');
+      setSuccessMessage(`Slot ${selectedSlot?.slot_code} flagged as unverified.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error flagging unverified:', error);
@@ -328,6 +340,12 @@ export default function PlateVerification() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {successMessage && (
+          <div className="p-3 bg-green-50 text-green-800 rounded-lg mb-4 flex items-center gap-2">
+            <CheckCircle size={18} />
+            {successMessage}
+          </div>
+        )}
         {/* Slot Selection */}
         <div className="card mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">Select Slot</label>
