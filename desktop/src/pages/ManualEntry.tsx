@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
-import { Slot } from '@parkwise/shared';
+import { Slot, ReservationStatus } from '@parkwise/shared';
 import {
   FileText, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   Trash2, Clock, User, Phone, MapPin
@@ -22,7 +22,13 @@ interface ManualEntry {
   hasPwdPermit: boolean;
   attendant: string;
   createdAt: string;
-  status: 'active' | 'voided';
+  // 'voided' is a staff action recorded in audit_log and always wins.
+  // Anything else reflects the reservation's REAL current status (fetched
+  // fresh in loadRecentEntries), not just whatever was true the moment
+  // this entry was created -- otherwise a paid, completed entry would go
+  // on showing "active" forever, which is exactly backwards from what the
+  // attendant needs to see.
+  status: ReservationStatus | 'voided';
   details: Record<string, any>;
 }
 
@@ -32,6 +38,29 @@ function formatDuration(totalMinutes: number): string {
   if (hours > 0 && minutes > 0) return `${hours}h ${minutes}m`;
   if (hours > 0) return `${hours}h`;
   return `${minutes}m`;
+}
+
+// Void ends a session with no payment collected -- only makes sense while
+// the reservation is still genuinely ongoing. Letting it show on an
+// already-completed, cancelled, or no-show entry would suggest an action
+// that doesn't make sense to take on something already resolved.
+function isVoidableStatus(status: ReservationStatus | 'voided'): boolean {
+  return status === 'active' || status === 'verified' || status === 'overstay';
+}
+
+function getEntryStatusBadgeClass(status: ReservationStatus | 'voided'): string {
+  switch (status) {
+    case 'voided':
+    case 'cancelled':
+    case 'no_show':
+      return 'bg-gray-100 text-gray-600';
+    case 'completed':
+      return 'bg-green-100 text-green-800';
+    case 'overstay':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-blue-100 text-blue-800';
+  }
 }
 
 export default function ManualEntry() {
@@ -89,21 +118,46 @@ export default function ManualEntry() {
 
       if (error) throw error;
 
-      const entries: ManualEntry[] = (data || []).map((item: any) => ({
-        id: item.id,
-        plate: item.details.plate,
-        customerName: item.details.customer_name || null,
-        customerPhone: item.details.customer_phone || null,
-        slot: item.details.slot_code,
-        slotId: item.details.slot_id,
-        timeIn: item.details.time_in,
-        durationMinutes: item.details.duration_minutes ?? Math.round((item.details.duration || 0) * 60),
-        hasPwdPermit: item.details.has_pwd_permit,
-        attendant: item.actor_id,
-        createdAt: item.created_at,
-        status: item.details.status || 'active',
-        details: item.details,
-      }));
+      // audit_log.details.status is only ever written at creation time
+      // ('active') or by handleVoidEntry ('voided') -- it has no idea a
+      // reservation was later paid off, cancelled, or went into overstay.
+      // Look up each entry's actual reservation status fresh so the badge
+      // (and the Void button's availability) reflect what's really true
+      // right now, not a snapshot from whenever this entry was created.
+      const reservationIds = (data || [])
+        .map((item: any) => item.details.reservation_id)
+        .filter(Boolean);
+
+      const liveStatusByReservationId: Record<string, ReservationStatus> = {};
+      if (reservationIds.length > 0) {
+        const { data: liveReservations } = await supabase
+          .from('reservations')
+          .select('id, status')
+          .in('id', reservationIds);
+        (liveReservations || []).forEach((r: any) => {
+          liveStatusByReservationId[r.id] = r.status;
+        });
+      }
+
+      const entries: ManualEntry[] = (data || []).map((item: any) => {
+        const wasVoided = item.details.status === 'voided';
+        const liveStatus = liveStatusByReservationId[item.details.reservation_id];
+        return {
+          id: item.id,
+          plate: item.details.plate,
+          customerName: item.details.customer_name || null,
+          customerPhone: item.details.customer_phone || null,
+          slot: item.details.slot_code,
+          slotId: item.details.slot_id,
+          timeIn: item.details.time_in,
+          durationMinutes: item.details.duration_minutes ?? Math.round((item.details.duration || 0) * 60),
+          hasPwdPermit: item.details.has_pwd_permit,
+          attendant: item.actor_id,
+          createdAt: item.created_at,
+          status: wasVoided ? 'voided' : (liveStatus || 'active'),
+          details: item.details,
+        };
+      });
 
       setRecentEntries(entries);
     } catch (error) {
@@ -609,7 +663,9 @@ export default function ManualEntry() {
                   <div
                     key={entry.id}
                     className={`p-4 border rounded-lg ${
-                      entry.status === 'voided' ? 'bg-gray-50 border-gray-200 opacity-60' : 'border-gray-200'
+                      entry.status === 'voided' || entry.status === 'cancelled' || entry.status === 'no_show'
+                        ? 'bg-gray-50 border-gray-200 opacity-60'
+                        : 'border-gray-200'
                     }`}
                   >
                     <div className="flex justify-between items-start mb-2">
@@ -617,9 +673,7 @@ export default function ManualEntry() {
                         <p className="font-semibold text-gray-900">{entry.plate}</p>
                         <p className="text-sm text-gray-600">{entry.slot}</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        entry.status === 'voided' ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getEntryStatusBadgeClass(entry.status)}`}>
                         {entry.status}
                       </span>
                     </div>
@@ -652,7 +706,7 @@ export default function ManualEntry() {
                       )}
                     </div>
 
-                    {isAdmin && entry.status === 'active' && (
+                    {isAdmin && isVoidableStatus(entry.status) && (
                       <div className="mt-3 flex gap-2">
                         <button
                           onClick={() => handleVoidEntry(entry)}
