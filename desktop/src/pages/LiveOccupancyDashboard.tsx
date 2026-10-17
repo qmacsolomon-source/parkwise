@@ -34,6 +34,16 @@ export default function LiveOccupancyDashboard() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
+  const [now, setNow] = useState(new Date());
+
+  // Drives the live H:M:S countdown on each occupied slot's card -- without
+  // this, getTimeRemaining() only ever recomputes when something else
+  // happens to trigger a re-render (a realtime update, a filter change),
+  // so the displayed time just sits there looking frozen in between.
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Calculate summary stats
@@ -253,18 +263,19 @@ export default function LiveOccupancyDashboard() {
     if (!slot.current_reservation_id) return null;
     const reservation = reservations[slot.current_reservation_id];
     if (!reservation) return null;
-    
+
     const endTime = new Date(reservation.end_time);
-    const now = new Date();
     const diff = endTime.getTime() - now.getTime();
-    
+
     if (diff <= 0) return 'Expired';
-    
+
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
+    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
   };
 
   if (loading) {
