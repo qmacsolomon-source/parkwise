@@ -57,3 +57,30 @@ It started with `DROP TABLE ... CASCADE` on every table. Re-running it after any
 ## Known limitation — not fixed, needs a backend
 
 In **User Management**, "Reset Password" and "Hard Delete" both call `supabase.auth.admin.*`, which requires a service-role key. Called from the browser with only the anon key, these will always fail. There's no safe way to fix this from the client — it needs a small backend component (e.g. a Supabase Edge Function) that holds the service-role key server-side. Worth knowing before demoing either button.
+
+## Round 2: Manual Entry was still failing even with the RLS fix applied
+
+After the `is_staff()` policies above were added, Manual Entry submissions still came back as "Failed to create manual entry" — but the data was actually being written (confirmed slot A12 correctly flipped to `occupied` with a real reservation attached, checked directly via the API). Two separate problems were layered on top of each other:
+
+### `profiles.id` had a hard foreign key to `auth.users(id)`
+
+Walk-in customers registered via Manual Entry never log in, so they have no `auth.users` row — but `profiles.id` required one via `REFERENCES auth.users(id) ON DELETE CASCADE`. Every walk-in profile insert was rejected outright by the database.
+
+- Dropped the FK and gave `id` a `DEFAULT uuid_generate_v4()` instead, in both `database/schema.sql` and `database/reset_database.sql`.
+- Real accounts (customers who sign up, staff created via Account Creation) are unaffected — the app still sets `id` explicitly to match their `auth.users` id when one exists.
+- **Action required on the live Supabase project**: run the schema changes in `database/schema.sql` (it includes a guarded upgrade path that drops the old constraint and sets the new default — safe to re-run).
+
+### Agent-service calls were turning successful operations into false failures
+
+Manual Entry (and Cash Payment) each call out to the Python agent-service (`localhost:8000`) as a side effect — informing it a slot is now occupied, or resetting it on void/payment. With the agent-service not running, those `fetch()` calls threw, and the *unrelated* database write that had already succeeded got reported as a failure anyway.
+
+- Wrapped these calls in their own try/catch (`console.warn` on failure instead of throwing) in `ManualEntry.tsx` (submit + void) and `CashPayment.tsx` (confirm payment) — the core database operation's success is no longer tied to whether the agent-service happens to be running.
+- `PlateVerification.tsx` was left untouched since talking to the agent-service is that page's actual job, not a side effect.
+
+### Manual Entry form, round 2
+
+- Vehicle Type removed from the form entirely (previously just had motorcycle removed) — always four-wheeled, set automatically
+- Time In is now automatic (current time at submission), no manual field
+- Mobile Number must be exactly 11 digits (was: at least 10)
+
+Confirmed working end-to-end in the browser after these fixes.

@@ -44,9 +44,14 @@ DO $$ BEGIN
   CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- Profiles table (linked to auth.users)
+-- Profiles table. Real accounts (customers who sign up, staff created via
+-- Account Creation) get id = their auth.users id, set explicitly by the app.
+-- Walk-in customers registered via Manual Entry never create a login, so id
+-- falls back to an auto-generated UUID with no matching auth.users row --
+-- that's why there's no REFERENCES auth.users(id) here (see the ALTER below
+-- for upgrading a database that still has the old hard FK).
 CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT NOT NULL,
@@ -99,6 +104,14 @@ CREATE TABLE IF NOT EXISTS reservations (
 -- (table already existed for anyone who ran the old schema.sql), so add it
 -- explicitly for upgrades.
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS annotation TEXT;
+
+-- Upgrade path for a database created with the old hard-FK profiles.id:
+-- drop the auth.users requirement and give id a default so walk-in profiles
+-- (Manual Entry) can be created without ever having a login account.
+DO $$ BEGIN
+  ALTER TABLE profiles DROP CONSTRAINT profiles_id_fkey;
+EXCEPTION WHEN undefined_object THEN NULL; END $$;
+ALTER TABLE profiles ALTER COLUMN id SET DEFAULT uuid_generate_v4();
 
 -- Agent states table (for camera/verification system)
 CREATE TABLE IF NOT EXISTS agent_states (

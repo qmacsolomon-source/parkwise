@@ -56,9 +56,12 @@ CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');
 CREATE TYPE payment_status AS ENUM ('unpaid', 'paid');
 CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');
 
--- Profiles table (linked to auth.users)
+-- Profiles table. Real accounts (customers who sign up, staff created via
+-- Account Creation) get id = their auth.users id, set explicitly by the app.
+-- Walk-in customers registered via Manual Entry never create a login, so id
+-- falls back to an auto-generated UUID with no matching auth.users row.
 CREATE TABLE profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT NOT NULL,

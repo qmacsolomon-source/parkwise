@@ -251,12 +251,18 @@ export default function ManualEntry() {
         })
         .eq('id', selectedSlot);
 
-      // Inform agent service
-      await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected_plate: plateNumber.toUpperCase() }),
-      });
+      // Inform agent service (best-effort: the reservation itself already
+      // succeeded above, so a missing/offline agent-service shouldn't make
+      // the whole manual entry report as failed)
+      try {
+        await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected_plate: plateNumber.toUpperCase() }),
+        });
+      } catch (agentError) {
+        console.warn('Agent service unreachable:', agentError);
+      }
 
       // Log to audit
       const slot = slots.find(s => s.id === selectedSlot);
@@ -338,8 +344,12 @@ export default function ManualEntry() {
           })
           .eq('id', entry.slotId);
 
-        // Reset agent
-        await fetch(`${AGENT_SERVICE_URL}/agents/${entry.slotId}/release`, { method: 'POST' });
+        // Reset agent (best-effort, same reasoning as above)
+        try {
+          await fetch(`${AGENT_SERVICE_URL}/agents/${entry.slotId}/release`, { method: 'POST' });
+        } catch (agentError) {
+          console.warn('Agent service unreachable:', agentError);
+        }
       }
 
       loadRecentEntries();

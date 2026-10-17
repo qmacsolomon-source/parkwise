@@ -214,8 +214,13 @@ export default function CashPayment() {
         current_reservation_id: null 
       }).eq('id', selectedReservation.slot_id);
 
-      // Reset agent
-      await fetch(`${AGENT_SERVICE_URL}/agents/${selectedReservation.slot_id}/release`, { method: 'POST' });
+      // Reset agent (best-effort: payment itself already succeeded above, so
+      // a missing/offline agent-service shouldn't block confirming payment)
+      try {
+        await fetch(`${AGENT_SERVICE_URL}/agents/${selectedReservation.slot_id}/release`, { method: 'POST' });
+      } catch (agentError) {
+        console.warn('Agent service unreachable:', agentError);
+      }
 
       // Log to audit
       await supabase.from('audit_log').insert({
