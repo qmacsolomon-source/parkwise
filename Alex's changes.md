@@ -1,6 +1,6 @@
 # Alex's Changes
 
-Notes on everything changed in this pass, so the team knows what moved and why. Nothing here touches the mobile app or agent-service.
+Notes on everything changed in this pass, so the team knows what moved and why. Nothing here touches the mobile app (left alone throughout, including this round, since that's actively being worked on separately).
 
 ## ⚠️ Action required on the live Supabase project
 
@@ -141,3 +141,98 @@ Five failed attempts locked out every account on that machine for 15 minutes, no
 ### Bonus: ProtectedRoute let profile-less users into the desktop console
 
 Found while reviewing the rest: a logged-in user with no `profiles` row at all (e.g. the exact scenario bug #2 above used to cause) wasn't blocked by the route guard, which only explicitly excluded `role === 'customer'`. Changed it to an allowlist (`attendant`/`admin` only, everyone else — including no profile — denied). Verified live: created a disposable, profile-less test account and confirmed it now gets "Access Denied" instead of full attendant access. That test account (`paranoid-test-1792200188@mailinator.com`) is still sitting in Supabase Auth with no profile and no way to delete it without a service-role key — harmless, but worth removing from the dashboard's Authentication tab eventually.
+
+## Round 4: full click-through audit of every page, plus a critical Manual Entry regression
+
+Asked for directly: "check all buttons, make sure they're doing their intended use." Ran one agent per page against the actual running app (already logged in), clicking every control for real rather than just reading code. Found real, previously-undetected bugs on 6 of the 10 pages. Also hit, diagnosed, and fixed a serious regression that briefly broke Manual Entry again after Round 3 shipped.
+
+### ⚠️ Action required on the live Supabase project
+
+Two more targeted SQL fixes this round (small, standalone — no need to re-run the full files). Both are included in the next full `database/business_rules.sql` / `database/rls_policies.sql` paste, but if you're applying them as standalone patches instead, run these two:
+
+```sql
+-- in rls_policies.sql: audit_log's INSERT policy was briefly too strict
+DROP POLICY IF EXISTS "System can insert audit entries" ON audit_log;
+CREATE POLICY "System can insert audit entries" ON audit_log
+  FOR INSERT WITH CHECK (actor_id = auth.uid() OR is_staff());
+```
+
+```sql
+-- in business_rules.sql: create_notification() and log_audit() both need
+-- SECURITY DEFINER -- see "The real Manual Entry regression" below for why.
+CREATE OR REPLACE FUNCTION create_notification(
+  user_uuid UUID,
+  notif_title TEXT,
+  notif_body TEXT,
+  notif_type notification_type,
+  related_reservation UUID DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  notification_id UUID;
+BEGIN
+  INSERT INTO notifications (user_id, title, body, type, related_reservation_id)
+  VALUES (user_uuid, notif_title, notif_body, notif_type, related_reservation)
+  RETURNING id INTO notification_id;
+  RETURN notification_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION log_audit(
+  actor_uuid UUID,
+  action_text TEXT,
+  audit_details JSONB DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  audit_id UUID;
+BEGIN
+  INSERT INTO audit_log (actor_id, action, details)
+  VALUES (actor_uuid, action_text, audit_details)
+  RETURNING id INTO audit_id;
+  RETURN audit_id;
+END;
+$$;
+```
+
+(Both snippets above were already run live and verified working during this session — re-running `business_rules.sql`/`rls_policies.sql` in full is only needed for a fresh environment; this project's live database already has all of it.)
+
+### The duplicate "Bell" icon, explained and fixed
+
+Every page showed what looked like two notification bells. They were two unrelated things sharing the same icon: `Layout.tsx`'s top-bar bell was a real "Notifications" button with **no `onClick` handler at all** (completely dead), while every individual page *also* had its own bell that was actually a sound-on/off toggle, just drawn with the wrong icon.
+
+- **`Layout.tsx`**: wired up a real, working notification dropdown — fetches the logged-in user's own `notifications` rows, shows an unread-count badge, marks read on click, clean empty/loading states. Verified live with real inserted/read data. Known limitation: every notification-creating trigger in the database only ever targets `customer_id` (never staff), so an attendant/admin account will normally see "No notifications yet" until the system also generates staff-facing notifications — that's a pre-existing gap, not something this fix invented or tried to paper over.
+- **Every page** (`LiveOccupancyDashboard`, `PlateVerification`, `CashPayment`, `TimeAndPaymentLog`, `ManualEntry`, `Reports`, `AccountCreation`, `SlotAssignment`, `UserManagement`, `RatesAndPricing`): swapped the mislabeled sound-toggle icon from `Bell` to `Volume2`/`VolumeX`, with a hover tooltip ("Sound alerts on/off"). Purely cosmetic, but it's exactly what was confusing — the two bells are now visually distinct.
+
+### Bugs found and fixed, page by page
+
+- **Live Occupancy**: the search box matched plates/customers **globally** instead of per-slot — searching any real plate or customer name highlighted every slot in the system, not just the right one. Fixed to look up each slot's own reservation chain. Also found (not fixed — needs real feature work, not a quick patch): **"Reassign Slot" and "Release Vehicle" on the slot detail drawer have no click handler at all.** They're decorative buttons that do nothing.
+- **Cash Payment**: confirming a payment auto-triggered `window.print()`, which opens a blocking native OS dialog with no way to dismiss it programmatically — froze the page for real users too, not just automation. Now the automatic post-payment action only downloads the receipt; printing is an explicit separate action. Also fixed "Print Receipt Again" being permanently dead code (the state it depended on was always cleared right before the button could render) and a related bug where the receipt would print "Amount Received: $NaN" after that state got cleared.
+- **Reports**: the Verification Results pie chart rendered completely blank with no message when there's no data (rather than a clean empty state like the other charts), and "Verification Success Rate" showed "NaN%" in that same case. Both fixed.
+- **Slot Assignment**: a slot in Maintenance was still hardcoded gray on the slot map, inconsistent with this session's earlier StatusBadge color fix — now orange, matching. Also fixed: the "Manage Slots" header button did nothing (it opened the modal but never set which slot to edit, so the modal's render condition was never satisfied).
+- **User Management**: "Reset Password" silently showed a false **"Operation successful!"** banner even when the underlying call failed (expected, since there's no service-role key) — it just never checked the error. Now shows the real failure instead of lying to the admin. "Last Login" and "Delete User" (both fixed in Round 3) were re-verified working.
+- **Manual Entry**: the Void Entry flow was wiping the original entry's plate/customer/slot/time data from its own audit log record every time it voided something, because of a stale `(entry as any).details` reference that never actually matched the real data shape. Fixed.
+- **Account Creation, Plate Verification, Time & Payment Log, Rates & Pricing**: no bugs found beyond the icon swap — each confirmed working as intended, including specific regression checks (Account Creation's admin-session-restore, Time & Payment Log's annotation save-and-persist, Rates & Pricing's grace-period/CEIL math from Round 3).
+
+### The real Manual Entry regression (found and fixed live, not by code review)
+
+Partway through this round, three independent agents hit the exact same wall: creating any new reservation failed with a 403, even though it had been confirmed fully working right after Round 3. Root-caused by direct testing against the live database (not guesswork):
+
+1. **First layer**: Round 3's `audit_log` INSERT policy fix (`WITH CHECK (actor_id = auth.uid())`, meant to stop customers forging audit entries) was *too* strict — it also blocked the database's own `audit_reservation_changes()` trigger, which legitimately logs `actor_id = NEW.customer_id` (the walk-in customer) when an attendant creates their reservation. Loosened to `actor_id = auth.uid() OR is_staff()`.
+2. **Second, deeper layer, found right after**: even with that fixed, reservations *still* failed — this time while inserting the "your reservation was created" notification. Postgres enforces the table's SELECT policy on an INSERT's `RETURNING` clause too, not just the INSERT policy itself, and `create_notification()`/`log_audit()` (both called from triggers, both doing `INSERT ... RETURNING id INTO ...`) were plain functions, not `SECURITY DEFINER` — so when an attendant creates something *for* a customer, the RETURNING clause gets blocked by "you can only view your own notifications/audit entries," and the whole transaction rolls back. This is a genuinely pre-existing bug (not introduced this session), just never triggered before because every prior end-to-end test happened to be run as an admin account whose broader view permissions masked it on the audit_log side — the notifications side has no such admin-wide policy at all, so it surfaced immediately. Fixed by marking both functions `SECURITY DEFINER` (same pattern already used for `is_admin()`/`is_attendant()`/`is_staff()` in this codebase).
+
+Verified with a real submission through the actual Manual Entry form ("Manual entry created successfully"), not just an API test. All test data (reservations, slot states) was cleaned up afterward.
+
+### Known issues, not fixed this round (flagged for later)
+
+- **Live Occupancy's "Reassign Slot" and "Release Vehicle" buttons do nothing** — need real slot-picker/payment-release flows built, not a one-line fix.
+- **Several pages use native `alert()`/`confirm()` dialogs** on certain failure paths (e.g. Plate Verification's Accept/Retry, some void/delete confirmations) — these work fine for real users, but are worth replacing with the custom modal pattern already used elsewhere in the app (e.g. the logout confirmation), both for UI consistency and because native dialogs can hang automated testing.
+- **Account Creation hit Supabase's built-in email rate limit** during this round's testing (too many test signups in one session) — not a bug, just infrastructure; be aware if testing signup again soon.

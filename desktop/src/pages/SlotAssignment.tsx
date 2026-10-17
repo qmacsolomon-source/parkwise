@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation } from '@parkwise/shared';
 import {
-  MapPin, AlertTriangle, CheckCircle, LogOut, Bell,
+  MapPin, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RefreshCw, Settings, Filter, Clock, User, Car
 } from 'lucide-react';
 
@@ -278,8 +278,9 @@ export default function SlotAssignment() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -409,7 +410,12 @@ export default function SlotAssignment() {
               <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
               {isAdmin && (
                 <button
-                  onClick={() => setShowSlotSettings(true)}
+                  onClick={() => {
+                    if (filteredSlots.length > 0) {
+                      setEditingSlot(filteredSlots[0]);
+                      setShowSlotSettings(true);
+                    }
+                  }}
                   className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
                 >
                   <Settings size={16} />
@@ -427,7 +433,7 @@ export default function SlotAssignment() {
                       : slot.status === 'occupied'
                       ? 'border-red-300 bg-red-50'
                       : slot.status === 'maintenance'
-                      ? 'border-gray-400 bg-gray-200'
+                      ? 'border-orange-300 bg-orange-100'
                       : 'border-gray-300 bg-gray-50'
                   } ${slot.is_pwd ? 'ring-2 ring-purple-400' : ''}`}
                   onClick={() => {

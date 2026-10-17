@@ -4,7 +4,7 @@ import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Rate, Penalty, Profile, Vehicle } from '@parkwise/shared';
 import {
   DollarSign, AlertTriangle, CheckCircle,
-  Receipt, Printer, RefreshCw, LogOut, Bell
+  Receipt, Printer, RefreshCw, LogOut, Volume2, VolumeX
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 
@@ -37,6 +37,11 @@ export default function CashPayment() {
   const [receiptNumber, setReceiptNumber] = useState('');
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [lastPayment, setLastPayment] = useState<{
+    reservation: Reservation;
+    calc: PaymentCalculation;
+    change: number;
+  } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -234,9 +239,12 @@ export default function CashPayment() {
       });
 
       setSuccess(true);
-      
-      // Generate and print receipt
-      generatePDF(receiptNum, calculation, change);
+      setLastPayment({ reservation: selectedReservation, calc: calculation, change });
+
+      // Generate (download) the receipt PDF. Printing is left to an explicit
+      // "Print Receipt Again" click so a successful payment doesn't force a
+      // blocking native print dialog on the attendant every time.
+      generatePDF(receiptNum, calculation, change, selectedReservation);
 
       // Refresh data
       loadData();
@@ -251,13 +259,19 @@ export default function CashPayment() {
     }
   };
 
-  const generatePDF = (receiptNum: string, calc: PaymentCalculation, change: number) => {
-    if (!selectedReservation) return;
+  const generatePDF = (
+    receiptNum: string,
+    calc: PaymentCalculation,
+    change: number,
+    reservation: Reservation,
+    shouldPrint: boolean = false
+  ) => {
+    if (!reservation) return;
 
     const doc = new jsPDF();
-    const customer = customers[selectedReservation.customer_id];
-    const vehicle = vehicles[selectedReservation.vehicle_id];
-    const slot = slots[selectedReservation.slot_id];
+    const customer = customers[reservation.customer_id];
+    const vehicle = vehicles[reservation.vehicle_id];
+    const slot = slots[reservation.slot_id];
 
     // Header
     doc.setFontSize(20);
@@ -288,8 +302,8 @@ export default function CashPayment() {
     doc.setFontSize(11);
     doc.text('Reservation Details', 20, 119);
     doc.setFontSize(10);
-    doc.text(`Start: ${new Date(selectedReservation.start_time).toLocaleString()}`, 20, 126);
-    doc.text(`End: ${new Date(selectedReservation.end_time).toLocaleString()}`, 20, 133);
+    doc.text(`Start: ${new Date(reservation.start_time).toLocaleString()}`, 20, 126);
+    doc.text(`End: ${new Date(reservation.end_time).toLocaleString()}`, 20, 133);
 
     // Line
     doc.line(20, 140, 190, 140);
@@ -322,9 +336,13 @@ export default function CashPayment() {
     doc.setFont(undefined, 'normal');
 
     // Payment
+    // (Computed from calc.total + change rather than the live amountReceived
+    // input, since that field is cleared right after a successful payment —
+    // this keeps "Print Receipt Again" accurate.)
+    const amountReceivedValue = calc.total + change;
     doc.setFontSize(10);
     doc.text(`Amount Received`, 20, 205);
-    doc.text(`$${parseFloat(amountReceived).toFixed(2)}`, 170, 205, { align: 'right' });
+    doc.text(`$${amountReceivedValue.toFixed(2)}`, 170, 205, { align: 'right' });
     doc.text(`Change`, 20, 212);
     doc.text(`$${change.toFixed(2)}`, 170, 212, { align: 'right' });
 
@@ -332,9 +350,12 @@ export default function CashPayment() {
     doc.setFontSize(8);
     doc.text('Thank you for using ParkWise!', 105, 280, { align: 'center' });
 
-    // Save and print
+    // Save the PDF; only trigger the (blocking, native) print dialog when
+    // the attendant explicitly asked to print.
     doc.save(`receipt-${receiptNum}.pdf`);
-    window.print();
+    if (shouldPrint) {
+      window.print();
+    }
   };
 
   const handleLogout = async () => {
@@ -371,8 +392,9 @@ export default function CashPayment() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -458,6 +480,19 @@ export default function CashPayment() {
                   <p className="text-sm">Receipt: {receiptNumber}</p>
                 </div>
               </div>
+            )}
+
+            {/* Print Receipt Button: kept outside the calculation/selectedReservation
+                block below, since both are cleared right after a successful payment -
+                otherwise this button could never be shown/clicked. */}
+            {success && lastPayment && (
+              <button
+                onClick={() => generatePDF(receiptNumber, lastPayment.calc, lastPayment.change, lastPayment.reservation, true)}
+                className="btn-secondary w-full flex items-center justify-center gap-2 mb-4"
+              >
+                <Printer size={18} />
+                Print Receipt Again
+              </button>
             )}
 
             {error && (
@@ -549,17 +584,6 @@ export default function CashPayment() {
                     </>
                   )}
                 </button>
-
-                {/* Print Receipt Button */}
-                {success && (
-                  <button
-                    onClick={() => generatePDF(receiptNumber, calculation, change)}
-                    className="btn-secondary w-full flex items-center justify-center gap-2 mt-3"
-                  >
-                    <Printer size={18} />
-                    Print Receipt Again
-                  </button>
-                )}
               </>
             )}
 

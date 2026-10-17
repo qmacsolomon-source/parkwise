@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Profile } from '@parkwise/shared';
 import {
-  Users, AlertTriangle, CheckCircle, LogOut, Bell,
+  Users, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RefreshCw, Search, Filter, Eye, Edit, Lock,
   Shield, Trash2, X, ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -213,9 +213,17 @@ export default function UserManagement() {
     try {
       // Reset password via Supabase Auth
       // Note: This requires admin API key in production
-      await supabase.auth.admin.updateUserById(selectedProfile.id, {
+      const { error: resetError } = await supabase.auth.admin.updateUserById(selectedProfile.id, {
         password: newPassword,
       });
+
+      if (resetError) {
+        // supabase-js does not throw on HTTP error responses here, so we
+        // must check the returned error explicitly - otherwise this silently
+        // reports success even when the request failed (e.g. 403 without a
+        // service-role key).
+        throw resetError;
+      }
 
       // Log to audit_log
       const { data: { user } } = await supabase.auth.getUser();
@@ -440,8 +448,9 @@ export default function UserManagement() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}

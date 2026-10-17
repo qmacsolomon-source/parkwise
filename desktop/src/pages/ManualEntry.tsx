@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot } from '@parkwise/shared';
 import {
-  FileText, AlertTriangle, CheckCircle, LogOut, Bell,
+  FileText, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   Trash2, Clock, User, Phone, MapPin
 } from 'lucide-react';
 
@@ -22,6 +22,7 @@ interface ManualEntry {
   attendant: string;
   createdAt: string;
   status: 'active' | 'voided';
+  details: Record<string, any>;
 }
 
 function formatDuration(totalMinutes: number): string {
@@ -99,6 +100,7 @@ export default function ManualEntry() {
         attendant: item.actor_id,
         createdAt: item.created_at,
         status: item.details.status || 'active',
+        details: item.details,
       }));
 
       setRecentEntries(entries);
@@ -319,7 +321,7 @@ export default function ManualEntry() {
         .from('audit_log')
         .update({
           details: {
-            ...(entry as any).details,
+            ...entry.details,
             status: 'voided',
             voided_by: user?.id,
             voided_at: new Date().toISOString(),
@@ -392,8 +394,9 @@ export default function ManualEntry() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? 'Sound alerts on' : 'Sound alerts off'}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}

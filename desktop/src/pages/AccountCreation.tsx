@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import {
-  UserPlus, AlertTriangle, CheckCircle, LogOut, Bell,
-  Eye, EyeOff, Shield
+  UserPlus, AlertTriangle, CheckCircle, LogOut,
+  Eye, EyeOff, Shield, Volume2, VolumeX
 } from 'lucide-react';
 
 export default function AccountCreation() {
@@ -207,8 +207,9 @@ export default function AccountCreation() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}

@@ -4,7 +4,7 @@ import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle } from '@parkwise/shared';
 import {
   Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw,
-  Clock, Search, Flag, Edit3, LogOut, Bell
+  Clock, Search, Flag, Edit3, LogOut, Volume2, VolumeX
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
@@ -306,9 +306,10 @@ export default function PlateVerification() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}

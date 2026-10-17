@@ -123,6 +123,17 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Function: Create notification
+--
+-- SECURITY DEFINER is required here, not optional: this is called from
+-- triggers to notify a CUSTOMER (e.g. NEW.customer_id on a reservation)
+-- while running as whichever role performed the action -- an attendant
+-- creating a walk-in's reservation, say. Postgres enforces the SELECT
+-- policy on the INSERT's RETURNING clause too, and "Users can view own
+-- notifications" only allows user_id = auth.uid(). Without SECURITY
+-- DEFINER, inserting a notification for anyone but yourself throws "new
+-- row violates row-level security policy for table notifications" and
+-- rolls back whatever triggered it -- which silently broke every
+-- attendant-created reservation.
 CREATE OR REPLACE FUNCTION create_notification(
   user_uuid UUID,
   notif_title TEXT,
@@ -130,7 +141,11 @@ CREATE OR REPLACE FUNCTION create_notification(
   notif_type notification_type,
   related_reservation UUID DEFAULT NULL
 )
-RETURNS UUID AS $$
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   notification_id UUID;
 BEGIN
@@ -139,15 +154,26 @@ BEGIN
   RETURNING id INTO notification_id;
   RETURN notification_id;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Function: Log audit entry
+--
+-- SECURITY DEFINER for the same reason as create_notification() above: the
+-- audit_log SELECT policies only cover "your own entries" or "admin sees
+-- everything" -- a plain attendant (not admin) logging an entry whose
+-- actor_id is the walk-in customer, not themselves, would fail the
+-- RETURNING clause's implicit SELECT check otherwise. This was masked
+-- during testing because the test account happened to be an admin.
 CREATE OR REPLACE FUNCTION log_audit(
   actor_uuid UUID,
   action_text TEXT,
   audit_details JSONB DEFAULT NULL
 )
-RETURNS UUID AS $$
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
   audit_id UUID;
 BEGIN
@@ -156,7 +182,7 @@ BEGIN
   RETURNING id INTO audit_id;
   RETURN audit_id;
 END;
-$$ LANGUAGE plpgsql;
+$$;
 
 -- Trigger: Create notification on reservation creation
 CREATE OR REPLACE FUNCTION notify_reservation_created()

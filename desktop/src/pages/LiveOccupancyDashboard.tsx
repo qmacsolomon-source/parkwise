@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/shared';
-import { 
-  LayoutDashboard, LogOut, RefreshCw, Search, 
-  AlertTriangle, Car, Clock, User, X, Bell, 
+import {
+  LayoutDashboard, LogOut, RefreshCw, Search,
+  AlertTriangle, Car, Clock, User, X, Volume2, VolumeX,
   CheckCircle, XCircle, AlertCircle, ParkingCircle,
   Accessibility, ChevronRight, Camera, FileText
 } from 'lucide-react';
@@ -52,12 +52,11 @@ export default function LiveOccupancyDashboard() {
         if (searchQuery) {
           const query = searchQuery.toLowerCase();
           const matchesCode = slot.slot_code.toLowerCase().includes(query);
-          const matchesPlate = Object.values(vehicles).some(v =>
-            v.plate_number.toLowerCase().includes(query)
-          );
-          const matchesCustomer = Object.values(customers).some(c =>
-            c.full_name.toLowerCase().includes(query)
-          );
+          const slotReservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : undefined;
+          const slotVehicle = slotReservation ? vehicles[slotReservation.vehicle_id] : undefined;
+          const slotCustomer = slotVehicle ? customers[slotVehicle.owner_id] : undefined;
+          const matchesPlate = slotVehicle ? slotVehicle.plate_number.toLowerCase().includes(query) : false;
+          const matchesCustomer = slotCustomer ? slotCustomer.full_name.toLowerCase().includes(query) : false;
           if (!matchesCode && !matchesPlate && !matchesCustomer) return false;
         }
 
@@ -86,7 +85,7 @@ export default function LiveOccupancyDashboard() {
 
         return a.slot_code.localeCompare(b.slot_code);
       });
-  }, [slots, searchQuery, filterStatus, filterPwdOnly, vehicles, customers]);
+  }, [slots, searchQuery, filterStatus, filterPwdOnly, vehicles, customers, reservations]);
 
   // Load data
   useEffect(() => {
@@ -293,9 +292,9 @@ export default function LiveOccupancyDashboard() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
-              title={soundEnabled ? 'Sound On' : 'Sound Off'}
+              title={soundEnabled ? 'Sound alerts on' : 'Sound alerts off'}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
