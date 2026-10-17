@@ -122,7 +122,16 @@ export default function TimeAndPaymentLog() {
       // Transform data to log entries
       const logEntries: LogEntry[] = (data || []).map((item: any) => {
         const reservation = item as Reservation;
-        const payment = item.payments as (Payment & { attendant?: { full_name: string } }) | null;
+        // payments.reservation_id has no UNIQUE constraint, so PostgREST
+        // treats reservations -> payments as one-to-many and always embeds
+        // it as an array, even though there's only ever one payment per
+        // reservation in practice (CashPayment checks for an existing one
+        // before inserting). Treating that array as a single object made
+        // every .base_charge/.total/etc access silently undefined, which
+        // is why every row in this log showed $0.00 regardless of what was
+        // actually paid.
+        const paymentsEmbed = item.payments as (Payment & { attendant?: { full_name: string } })[] | null;
+        const payment = paymentsEmbed?.[0] || null;
         const customer = item.profiles as Profile;
         const vehicle = item.vehicles as Vehicle;
         const slot = item.slots as Slot;
