@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle } from '@parkwise/shared';
+import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle, groupSlotsByFloor } from '@parkwise/shared';
 import {
   Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw,
   Clock, Search, Flag, Edit3, LogOut, Volume2, VolumeX
@@ -359,10 +359,14 @@ export default function PlateVerification() {
             className="input"
           >
             <option value="">-- Select a slot --</option>
-            {slots.map(slot => (
-              <option key={slot.id} value={slot.id}>
-                {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
-              </option>
+            {groupSlotsByFloor(slots).map(group => (
+              <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                {group.slots.map(slot => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>

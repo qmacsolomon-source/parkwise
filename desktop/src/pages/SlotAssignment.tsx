@@ -2,7 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, Reservation } from '@parkwise/shared';
+import { Slot, Reservation, groupSlotsByFloor } from '@parkwise/shared';
+import ParkingFloorMap from '../components/ParkingFloorMap';
+import FloorSwitcher from '../components/FloorSwitcher';
 import {
   MapPin, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RefreshCw, Settings, Filter, Clock, User, Car
@@ -37,6 +39,13 @@ export default function SlotAssignment() {
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
   const [showSlotSettings, setShowSlotSettings] = useState(false);
+  const [floor, setFloor] = useState(1);
+  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
+
+  const handleFloorChange = (newFloor: number) => {
+    setFloorDirection(newFloor > floor ? 'up' : 'down');
+    setFloor(newFloor);
+  };
 
   const isAdmin = profile?.role === 'admin';
 
@@ -280,6 +289,7 @@ export default function SlotAssignment() {
 
   const filteredSlots = filterPwd ? slots.filter(s => s.is_pwd) : slots;
   const availableSlots = filteredSlots.filter(s => s.status === 'available');
+  const totalFloors = slots.reduce((max, s) => Math.max(max, s.floor), 1);
 
   return (
     <div className="min-h-screen bg-background">
@@ -425,52 +435,40 @@ export default function SlotAssignment() {
 
           {/* Slot Map */}
           <div className="card">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    if (filteredSlots.length > 0) {
-                      setEditingSlot(filteredSlots[0]);
-                      setShowSlotSettings(true);
-                    }
-                  }}
-                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
-                >
-                  <Settings size={16} />
-                  Manage Slots
-                </button>
-              )}
+              <div className="flex items-center gap-3">
+                <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      const onThisFloor = filteredSlots.filter(s => s.floor === floor);
+                      if (onThisFloor.length > 0) {
+                        setEditingSlot(onThisFloor[0]);
+                        setShowSlotSettings(true);
+                      }
+                    }}
+                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
+                  >
+                    <Settings size={16} />
+                    Manage Slots
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-4 gap-3 max-h-[600px] overflow-y-auto">
-              {filteredSlots.map((slot) => (
-                <div
-                  key={slot.id}
-                  className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    slot.status === 'available'
-                      ? 'border-green-300 bg-green-50 hover:bg-green-100'
-                      : slot.status === 'occupied'
-                      ? 'border-red-300 bg-red-50'
-                      : slot.status === 'maintenance'
-                      ? 'border-orange-300 bg-orange-100'
-                      : 'border-gray-300 bg-gray-50'
-                  } ${slot.is_pwd ? 'ring-2 ring-purple-400' : ''}`}
-                  onClick={() => {
-                    if (isAdmin) {
-                      setEditingSlot(slot);
-                      setShowSlotSettings(true);
-                    }
-                  }}
-                >
-                  <div className="text-center">
-                    <div className="font-semibold text-gray-900">{slot.slot_code}</div>
-                    <div className="text-xs text-gray-600 capitalize">{slot.status}</div>
-                    {slot.is_pwd && (
-                      <div className="text-xs text-purple-600 font-medium">PWD</div>
-                    )}
-                  </div>
-                </div>
-              ))}
+            <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+              <ParkingFloorMap
+                slots={filteredSlots}
+                floor={floor}
+                selectedSlotId={editingSlot?.id}
+                onSlotClick={(slot) => {
+                  if (isAdmin) {
+                    setEditingSlot(slot);
+                    setShowSlotSettings(true);
+                  }
+                }}
+                getSlotTitle={(slot) => `${slot.slot_code} - ${slot.status}${slot.is_pwd ? ' (PWD)' : ''}`}
+              />
             </div>
           </div>
         </div>
@@ -504,10 +502,14 @@ export default function SlotAssignment() {
                   disabled={reassigning}
                 >
                   <option value="">-- Select a slot --</option>
-                  {availableSlots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
-                    </option>
+                  {groupSlotsByFloor(availableSlots).map(group => (
+                    <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                      {group.slots.map((slot) => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>

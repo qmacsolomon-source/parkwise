@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, ReservationStatus } from '@parkwise/shared';
+import { Slot, ReservationStatus, groupSlotsByFloor } from '@parkwise/shared';
 import {
   FileText, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   Trash2, Clock, User, Phone, MapPin
@@ -568,10 +568,14 @@ export default function ManualEntry() {
                   disabled={saving}
                 >
                   <option value="">Select a slot</option>
-                  {slots.map(slot => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
-                    </option>
+                  {groupSlotsByFloor(slots).map(group => (
+                    <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                      {group.slots.map(slot => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 {slots.length === 0 && (

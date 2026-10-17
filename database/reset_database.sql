@@ -83,12 +83,18 @@ CREATE TABLE vehicles (
 );
 
 -- Slots table
+-- floor/zone/zone_row/zone_col describe WHERE a slot sits on the visual
+-- parking map -- see schema.sql for the full explanation.
 CREATE TABLE slots (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slot_code TEXT NOT NULL UNIQUE,
   is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
   status slot_status NOT NULL DEFAULT 'available',
-  current_reservation_id UUID
+  current_reservation_id UUID,
+  floor SMALLINT NOT NULL DEFAULT 1,
+  zone TEXT NOT NULL DEFAULT 'block_a' CHECK (zone IN ('compact', 'block_a', 'block_b', 'side')),
+  zone_row TEXT CHECK (zone_row IN ('top', 'bottom')),
+  zone_col SMALLINT NOT NULL DEFAULT 1
 );
 
 -- Reservations table

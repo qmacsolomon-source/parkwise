@@ -291,3 +291,28 @@ Verified live end-to-end: called the deployed function directly with a real admi
 ### Cleanup note
 
 The simulation's disposable walk-in customer ("Shift Simulation") couldn't be fully hard-deleted once it had a completed reservation attached - attempting it surfaced a real constraint (the reservation-delete cascade tries to log an audit entry attributed to the very customer being deleted). This isn't a bug: it's the same reason `UserManagement.tsx`'s own Delete action already soft-deletes (disables) any account with reservation history instead of hard-deleting it. Did the same here - the test profile is disabled and clearly renamed `[TEST - Shift Simulation, disabled]` rather than force-deleted.
+
+## Round 7: a real 3-floor parking map for Live Occupancy and Slot Assignment
+
+Replaced the plain uniform grid of slot cards with an actual visual parking map matching a real garage floor plan you provided: a small "compact" row near the entrance, an elevator/stairs landmark, two big double-loaded-aisle blocks (a top row and a bottom row of 10 spots each, split by a divider), and a single-file column along the far wall - repeated across 3 floors, with a floor switcher (and a brief rise/descend animation when changing floors) above the map. This is genuinely what the system should look like for something billed as "the digital representation of their parking lot."
+
+### ⚠️ Action required on the live Supabase project - two files, in order, once
+
+This is a bigger database change than usual: the slot layout went from 20 slots (A1-A20) to 168 (56 per floor x 3 floors). Run these two files, in this exact order:
+
+1. `database/schema.sql` - adds the new `floor`/`zone`/`zone_row`/`zone_col` columns to `slots` (safe to re-run, as always).
+2. `database/migrate_multi_floor_layout.sql` - **new, one-time file.** This is NOT part of schema.sql/seed.sql on purpose: it `UPDATE`s your 20 existing slots by their old code (A1 -> 1C1, A2 -> 1C2, etc.) to relocate them into floor 1's new layout rather than deleting and recreating them, specifically so every reservation and payment already tied to those slots stays intact - nothing gets wiped. It then adds the rest of floor 1 plus all of floors 2 and 3. Verified live: ran both, confirmed all 168 slots landed with the right floor/zone breakdown (56/floor, 6 PWD total), and confirmed the original A1-A20 history (the real `SIM001` test payment, the historical entries) was still there afterward under its new slot codes.
+
+A brand-new install never needs the migration file - `seed.sql` now seeds the full 168-slot, 3-floor layout directly.
+
+### What's new
+
+- **`ParkingFloorMap.tsx`** (new shared component) - renders one floor's worth of slots in the layout described above, reusing the same status color convention as `StatusBadge.tsx` (just a shade more saturated, since a 36px map cell needs more contrast than a full-width badge to still read at a glance). Clicking a slot does exactly what clicking a card used to: opens the slot detail drawer on Live Occupancy, opens the Manage Slot modal on Slot Assignment.
+- **`FloorSwitcher.tsx`** (new shared component) - floor tabs (built from however many distinct floor numbers actually exist in the data, not hardcoded to 3) plus up/down arrows, used identically on both pages.
+- **The floor-change animation** is a plain CSS keyframe (`index.css`) - the incoming floor's map rises into view when going up, descends when going down. No new dependency needed for it.
+- **Live Occupancy** keeps the old card grid too, as a "List" view next to the new "Map" view (a toggle, defaulting to Map) - searching by plate/customer/slot code now auto-switches floor if the only match is on a different one than currently showing, instead of leaving the map looking empty.
+- **Slot codes changed format**: `A1`-`A20` is now `{floor}{zone letter}{number}`, e.g. `1A7`, `2B14`, `3S3`. The map itself hides the leading floor digit on each cell (floor is already obvious from the page around it) but the full code is still what's stored and what shows everywhere else (dropdowns, logs, receipts).
+
+### A real usability bug found immediately after the migration, and fixed
+
+Manual Entry's, Plate Verification's, and Slot Assignment's plain `<select>` slot dropdowns went from a clean 20-item list to a 168-item one with **no sort order at all** (Postgres returns unordered rows without an explicit `.order()`, and the one that existed, `slot_code` string-sorted, puts "1A10" before "1A2") - scrolling through it to find a specific slot was genuinely painful. Added a shared sort/group utility, `groupSlotsByFloor()` (new, `shared/src/slotLayout.ts`), that orders slots the way someone looking at the actual map would expect - by floor, then by walking through the map itself (compact row, block A top-to-bottom, block B top-to-bottom, side column) - and wired all three dropdowns to use it with `<optgroup>` sections per floor. Verified live: each dropdown now shows three clearly-labeled "Floor 1/2/3" groups, each in correct walking order.

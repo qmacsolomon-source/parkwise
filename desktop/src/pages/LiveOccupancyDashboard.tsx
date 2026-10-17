@@ -8,8 +8,11 @@ import {
   LayoutDashboard, LogOut, RefreshCw, Search,
   AlertTriangle, Car, Clock, User, X, Volume2, VolumeX,
   CheckCircle, XCircle, AlertCircle, ParkingCircle,
-  Accessibility, ChevronRight, Camera, FileText
+  Accessibility, ChevronRight, Camera, FileText,
+  LayoutGrid, List
 } from 'lucide-react';
+import ParkingFloorMap from '../components/ParkingFloorMap';
+import FloorSwitcher from '../components/FloorSwitcher';
 
 interface SummaryStats {
   total: number;
@@ -35,6 +38,14 @@ export default function LiveOccupancyDashboard() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(new Date());
+  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+  const [floor, setFloor] = useState(1);
+  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
+
+  const handleFloorChange = (newFloor: number) => {
+    setFloorDirection(newFloor > floor ? 'up' : 'down');
+    setFloor(newFloor);
+  };
 
   // Drives the live H:M:S countdown on each occupied slot's card -- without
   // this, getTimeRemaining() only ever recomputes when something else
@@ -98,6 +109,23 @@ export default function LiveOccupancyDashboard() {
         return a.slot_code.localeCompare(b.slot_code);
       });
   }, [slots, searchQuery, filterStatus, filterPwdOnly, vehicles, customers, reservations]);
+
+  const totalFloors = React.useMemo(
+    () => slots.reduce((max, s) => Math.max(max, s.floor), 1),
+    [slots]
+  );
+
+  // If a search only matches something on a different floor than the one
+  // showing, jump there automatically instead of leaving the attendant
+  // looking at an empty map wondering where their result went.
+  useEffect(() => {
+    if (!searchQuery) return;
+    const hasMatchOnCurrentFloor = filteredSlots.some(s => s.floor === floor);
+    if (hasMatchOnCurrentFloor) return;
+    const firstMatch = filteredSlots[0];
+    if (firstMatch) handleFloorChange(firstMatch.floor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, filteredSlots]);
 
   // Load data
   useEffect(() => {
@@ -376,7 +404,48 @@ export default function LiveOccupancyDashboard() {
           </div>
         </div>
 
-        {/* Slot Grid */}
+        {/* Map / List toggle + floor switcher */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shadow-card w-fit">
+            <button
+              onClick={() => setViewMode('map')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'map' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <LayoutGrid size={16} /> Map
+            </button>
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                viewMode === 'list' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100'
+              }`}
+            >
+              <List size={16} /> List
+            </button>
+          </div>
+          {viewMode === 'map' && (
+            <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
+          )}
+        </div>
+
+        {viewMode === 'map' ? (
+          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+            <ParkingFloorMap
+              slots={filteredSlots}
+              floor={floor}
+              onSlotClick={handleSlotClick}
+              selectedSlotId={selectedSlot?.id}
+              getSlotTitle={(slot) => {
+                const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
+                const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
+                const customer = vehicle ? customers[vehicle.owner_id] : null;
+                if (!vehicle) return `${slot.slot_code} - ${slot.status}`;
+                return `${slot.slot_code} - ${vehicle.plate_number}${customer ? ` - ${customer.full_name}` : ''}`;
+              }}
+            />
+          </div>
+        ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
           {filteredSlots.map(slot => {
             const agentState = agentStates[slot.id];
@@ -436,8 +505,9 @@ export default function LiveOccupancyDashboard() {
             );
           })}
         </div>
+        )}
 
-        {filteredSlots.length === 0 && (
+        {viewMode === 'list' && filteredSlots.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <ParkingCircle size={48} className="mx-auto mb-4 opacity-50" />
             <p>No slots match your filters</p>
