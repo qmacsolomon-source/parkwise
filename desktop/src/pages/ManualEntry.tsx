@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Slot } from '@parkwise/shared';
 import {
@@ -35,6 +36,7 @@ function formatDuration(totalMinutes: number): string {
 
 export default function ManualEntry() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [recentEntries, setRecentEntries] = useState<ManualEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -311,7 +313,7 @@ export default function ManualEntry() {
   };
 
   const handleVoidEntry = async (entry: ManualEntry) => {
-    if (!confirm('Are you sure you want to void this manual entry?')) return;
+    if (!(await dialog.confirm('Are you sure you want to void this manual entry?'))) return;
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -358,7 +360,7 @@ export default function ManualEntry() {
       loadSlots();
     } catch (error) {
       console.error('Error voiding entry:', error);
-      alert('Failed to void entry');
+      await dialog.alert('Failed to void entry');
     }
   };
 

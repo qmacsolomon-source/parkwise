@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -11,6 +12,7 @@ const AGENT_SERVICE_URL = 'http://localhost:8000';
 
 export default function PlateVerification() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -162,7 +164,7 @@ export default function PlateVerification() {
       loadData();
     } catch (error) {
       console.error('Error accepting vehicle:', error);
-      alert('Failed to accept vehicle');
+      await dialog.alert('Failed to accept vehicle');
     } finally {
       setActionLoading(false);
     }
@@ -178,7 +180,7 @@ export default function PlateVerification() {
       loadData();
     } catch (error) {
       console.error('Error retrying capture:', error);
-      alert('Failed to retry capture');
+      await dialog.alert('Failed to retry capture');
     } finally {
       setActionLoading(false);
     }
@@ -186,7 +188,7 @@ export default function PlateVerification() {
 
   const handleManualOverride = async () => {
     if (!overrideReason.trim()) {
-      alert('Please provide a reason for manual override');
+      await dialog.alert('Please provide a reason for manual override');
       return;
     }
 
@@ -209,7 +211,7 @@ export default function PlateVerification() {
       loadData();
     } catch (error) {
       console.error('Error with manual override:', error);
-      alert('Failed to record manual override');
+      await dialog.alert('Failed to record manual override');
     } finally {
       setActionLoading(false);
     }
@@ -217,7 +219,7 @@ export default function PlateVerification() {
 
   const handleFlagUnverified = async () => {
     if (!flagReason.trim()) {
-      alert('Please provide a reason for flagging');
+      await dialog.alert('Please provide a reason for flagging');
       return;
     }
 
@@ -245,7 +247,7 @@ export default function PlateVerification() {
       loadData();
     } catch (error) {
       console.error('Error flagging unverified:', error);
-      alert('Failed to flag as unverified');
+      await dialog.alert('Failed to flag as unverified');
     } finally {
       setActionLoading(false);
     }

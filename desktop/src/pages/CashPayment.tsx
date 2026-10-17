@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Rate, Penalty, Profile, Vehicle } from '@parkwise/shared';
@@ -20,6 +21,10 @@ interface PaymentCalculation {
 
 export default function CashPayment() {
   const { profile, logout } = useAuth();
+  const location = useLocation();
+  const pendingReservationId = useRef<string | null>(
+    (location.state as { reservationId?: string } | null)?.reservationId ?? null
+  );
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [slots, setSlots] = useState<Record<string, Slot>>({});
   const [rates, setRates] = useState<Rate | null>(null);
@@ -155,6 +160,19 @@ export default function CashPayment() {
       setError('Failed to calculate payment');
     }
   };
+
+  // Came here from Live Occupancy's "Release Vehicle" for a specific
+  // reservation -- select it automatically once rates/reservations have
+  // actually loaded (calculatePayment needs rates), instead of making the
+  // attendant re-find it in this page's list. Only consume once.
+  useEffect(() => {
+    if (!pendingReservationId.current || !rates || reservations.length === 0) return;
+    const target = reservations.find(r => r.id === pendingReservationId.current);
+    pendingReservationId.current = null;
+    if (target) {
+      handleReservationSelect(target);
+    }
+  }, [reservations, rates]);
 
   const handleConfirmPayment = async () => {
     if (!selectedReservation || !calculation) return;

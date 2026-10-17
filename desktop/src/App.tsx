@@ -1,6 +1,7 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { DialogProvider } from './contexts/DialogContext';
 import { isConfigured } from '@parkwise/shared';
 import type { UserRole } from '@parkwise/shared';
 import Login from './pages/Login';
@@ -238,7 +239,9 @@ function App() {
       <BrowserRouter>
         <EnvCheck>
           <AuthProvider>
-            <AppRoutes />
+            <DialogProvider>
+              <AppRoutes />
+            </DialogProvider>
           </AuthProvider>
         </EnvCheck>
       </BrowserRouter>

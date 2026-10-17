@@ -211,19 +211,16 @@ export default function UserManagement() {
     setError('');
     
     try {
-      // Reset password via Supabase Auth
-      // Note: This requires admin API key in production
-      const { error: resetError } = await supabase.auth.admin.updateUserById(selectedProfile.id, {
-        password: newPassword,
+      // Resetting someone else's password needs the service-role key, which
+      // must never live in the browser - the admin-user-actions Edge
+      // Function holds it server-side and does this on our behalf after
+      // re-checking we're actually an admin.
+      const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'reset_password', targetUserId: selectedProfile.id, newPassword },
       });
 
-      if (resetError) {
-        // supabase-js does not throw on HTTP error responses here, so we
-        // must check the returned error explicitly - otherwise this silently
-        // reports success even when the request failed (e.g. 403 without a
-        // service-role key).
-        throw resetError;
-      }
+      if (fnError) throw fnError;
+      if (fnData?.error) throw new Error(fnData.error);
 
       // Log to audit_log
       const { data: { user } } = await supabase.auth.getUser();
@@ -379,8 +376,17 @@ export default function UserManagement() {
           },
         });
       } else {
-        // Hard delete
-        await supabase.auth.admin.deleteUser(selectedProfile.id);
+        // Hard delete: same reasoning as reset-password above - the
+        // auth.users deletion needs the service-role key, so it goes
+        // through the Edge Function. The profiles row deletion doesn't
+        // need elevated privileges (admins already have an RLS DELETE
+        // policy for it), so that part stays a direct client call.
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-user-actions', {
+          body: { action: 'hard_delete', targetUserId: selectedProfile.id },
+        });
+        if (fnError) throw fnError;
+        if (fnData?.error) throw new Error(fnData.error);
+
         await supabase.from('profiles').delete().eq('id', selectedProfile.id);
 
         // Log as hard delete

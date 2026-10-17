@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Reservation, Payment, Profile, Vehicle, Slot, VerificationEvent } from '@parkwise/shared';
 import {
@@ -27,6 +28,7 @@ interface LogEntry {
 
 export default function TimeAndPaymentLog() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -207,7 +209,7 @@ export default function TimeAndPaymentLog() {
       setAnnotationText('');
     } catch (error) {
       console.error('Error saving annotation:', error);
-      alert('Failed to save annotation');
+      await dialog.alert('Failed to save annotation');
     } finally {
       setSavingAnnotation(false);
     }

@@ -54,9 +54,9 @@ It started with `DROP TABLE ... CASCADE` on every table. Re-running it after any
 
 `desktop/src/pages/Dashboard.tsx` was never routed anywhere (`LiveOccupancyDashboard.tsx` replaced it), but was still imported in `App.tsx`. Deleted it along with its two only-used-there helper components, `SlotCard.tsx` and `ReservationCard.tsx`.
 
-## Known limitation — not fixed, needs a backend
+## ~~Known limitation — not fixed, needs a backend~~ — fixed in Round 5
 
-In **User Management**, "Reset Password" and "Hard Delete" both call `supabase.auth.admin.*`, which requires a service-role key. Called from the browser with only the anon key, these will always fail. There's no safe way to fix this from the client — it needs a small backend component (e.g. a Supabase Edge Function) that holds the service-role key server-side. Worth knowing before demoing either button.
+~~In **User Management**, "Reset Password" and "Hard Delete" both call `supabase.auth.admin.*`, which requires a service-role key. Called from the browser with only the anon key, these will always fail.~~ Fixed properly via a Supabase Edge Function — see Round 5 below.
 
 ## Round 2: Manual Entry was still failing even with the RLS fix applied
 
@@ -233,6 +233,42 @@ Verified with a real submission through the actual Manual Entry form ("Manual en
 
 ### Known issues, not fixed this round (flagged for later)
 
-- **Live Occupancy's "Reassign Slot" and "Release Vehicle" buttons do nothing** — need real slot-picker/payment-release flows built, not a one-line fix.
-- **Several pages use native `alert()`/`confirm()` dialogs** on certain failure paths (e.g. Plate Verification's Accept/Retry, some void/delete confirmations) — these work fine for real users, but are worth replacing with the custom modal pattern already used elsewhere in the app (e.g. the logout confirmation), both for UI consistency and because native dialogs can hang automated testing.
+- ~~Live Occupancy's "Reassign Slot" and "Release Vehicle" buttons do nothing~~ — fixed in Round 5.
+- ~~Several pages use native `alert()`/`confirm()` dialogs~~ — fixed in Round 5.
 - **Account Creation hit Supabase's built-in email rate limit** during this round's testing (too many test signups in one session) — not a bug, just infrastructure; be aware if testing signup again soon.
+
+## Round 5: native popups, the two dead Live Occupancy buttons, and a real fix for Reset Password / Hard Delete
+
+Picked up the three items flagged at the end of Round 4.
+
+### ⚠️ Action required — but only once, and not through the SQL editor this time
+
+This round added a **Supabase Edge Function**, which can't be pasted into the SQL editor like everything else so far. If you're setting this project up somewhere new, deploy it with the Supabase CLI from the repo root:
+
+```
+npx supabase init      # press Enter through any prompts
+npx supabase login     # opens your browser to authorize
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy admin-user-actions
+```
+
+No key to copy anywhere — Supabase gives every Edge Function access to the project's service-role key automatically, server-side only. Already deployed and verified working on the live project as of this round.
+
+### Native browser popups replaced everywhere
+
+Every `window.alert()` and `window.confirm()` in the app (11 call sites across `LiveOccupancyDashboard.tsx`, `ManualEntry.tsx`, `PlateVerification.tsx`, `TimeAndPaymentLog.tsx`) replaced with a proper in-app dialog that matches the rest of the UI (same style as the Logout confirmation). New shared piece: `desktop/src/contexts/DialogContext.tsx` — a `DialogProvider` (wrapped around the whole app in `App.tsx`) exposing a `useDialog()` hook with promise-based `alert(message)` / `confirm(message)`, so call sites read almost identically to the native versions (`await dialog.confirm('...')` instead of `confirm('...')`) but render as a styled modal instead of a jarring plain browser box. Also fixes the native-dialog-freezing-automated-testing problem noted in earlier rounds.
+
+### Live Occupancy's "Reassign Slot" and "Release Vehicle" — now gated correctly and actually do something
+
+These two buttons used to render unconditionally and do nothing at all. Two problems, both fixed:
+
+1. **They didn't make sense for every slot status.** Reassigning only makes sense before the car has actually arrived (`slot.status === 'reserved'`) — reassigning an occupied slot would mean moving a parked car, which isn't what this button is for. Releasing a vehicle only makes sense once a car is actually there (`occupied`/`overstay`/`unverified`). Both buttons are now hidden outside their correct status, instead of always showing regardless of whether the action makes sense.
+2. **They didn't do anything.** Rather than duplicate Slot Assignment's reassignment logic and Cash Payment's payment logic inside this drawer too, both buttons now navigate to the page that already does that job correctly (tested and fixed earlier this session) — **and carry the specific reservation along with them**, so the destination page opens straight into the right flow (Slot Assignment's reassign modal already open on the right reservation; Cash Payment with that reservation already selected and the charge calculated) instead of making the attendant re-find it from scratch.
+
+### Reset Password / Hard Delete — properly fixed, not just failing honestly anymore
+
+The real fix flagged as a limitation since Round 1: a new Supabase Edge Function, `supabase/functions/admin-user-actions/index.ts`, does the privileged work instead of the browser trying to. It checks the caller's own session is actually an admin (via the same `profiles` table/RLS the rest of the app trusts), and only then uses the service-role key — which lives purely as a Supabase-managed secret on the function's server, deployed via the Supabase CLI, never pasted into any file or seen by the browser — to actually reset the password or delete the auth user. `UserManagement.tsx` now calls this function (`supabase.functions.invoke('admin-user-actions', ...)`) instead of `supabase.auth.admin.*` directly.
+
+One bug found and fixed during testing: the function's own auth check initially failed every request with "Not authenticated" — `auth.getUser()` ignores the request's Authorization header for its own calls unless the token is passed to it explicitly (it otherwise only looks at client-side session storage, which doesn't exist in a stateless server function). Fixed by extracting the bearer token and passing it directly: `callerClient.auth.getUser(jwt)`.
+
+Verified live end-to-end: called the deployed function directly with a real admin session and confirmed the full chain works (authenticated → confirmed admin → service-role action actually reaches Supabase's Auth system) — used it to clean up the disposable `paranoid-test-...@mailinator.com` account left over from Round 4's testing, rather than touch any real account.

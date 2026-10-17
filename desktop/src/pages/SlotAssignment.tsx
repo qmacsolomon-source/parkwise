@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation } from '@parkwise/shared';
@@ -18,6 +19,10 @@ interface ReservationWithDetails extends Reservation {
 
 export default function SlotAssignment() {
   const { profile, logout } = useAuth();
+  const location = useLocation();
+  const pendingReservationId = useRef<string | null>(
+    (location.state as { reservationId?: string } | null)?.reservationId ?? null
+  );
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reservations, setReservations] = useState<ReservationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +103,20 @@ export default function SlotAssignment() {
       }));
 
       setReservations(reservationsWithDetails);
+
+      // Came here from Live Occupancy's "Reassign Slot" for a specific
+      // reservation -- open straight into that reassign flow instead of
+      // making the attendant re-find it in this page's list. Only consume
+      // once, so the realtime subscription's later refreshes don't keep
+      // re-opening the modal.
+      if (pendingReservationId.current) {
+        const target = reservationsWithDetails.find(r => r.id === pendingReservationId.current);
+        pendingReservationId.current = null;
+        if (target) {
+          setSelectedReservation(target);
+          setShowReassignModal(true);
+        }
+      }
     } catch (error) {
       console.error('Error loading reservations:', error);
     } finally {

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -530,10 +532,12 @@ function SlotDrawer({
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const dialog = useDialog();
+  const navigate = useNavigate();
 
   const handleResolveAlert = async () => {
     if (!resolveNote.trim()) {
-      alert('Please enter a note');
+      await dialog.alert('Please enter a note');
       return;
     }
 
@@ -560,7 +564,7 @@ function SlotDrawer({
       onClose();
     } catch (error) {
       console.error('Failed to resolve alert:', error);
-      alert('Failed to resolve alert');
+      await dialog.alert('Failed to resolve alert');
     } finally {
       setLoading(false);
     }
@@ -713,14 +717,24 @@ function SlotDrawer({
                 Resolve Alert
               </button>
             )}
-            <button className="btn-secondary w-full flex items-center justify-center gap-2">
-              <ChevronRight size={18} />
-              Reassign Slot
-            </button>
-            <button className="btn-secondary w-full flex items-center justify-center gap-2">
-              <LogOut size={18} />
-              Release Vehicle (Cash Payment)
-            </button>
+            {slot.status === 'reserved' && reservation && (
+              <button
+                onClick={() => navigate('/slot-assignment', { state: { reservationId: reservation.id } })}
+                className="btn-secondary w-full flex items-center justify-center gap-2"
+              >
+                <ChevronRight size={18} />
+                Reassign Slot
+              </button>
+            )}
+            {(slot.status === 'occupied' || slot.status === 'overstay' || slot.status === 'unverified') && reservation && (
+              <button
+                onClick={() => navigate('/payment', { state: { reservationId: reservation.id } })}
+                className="btn-secondary w-full flex items-center justify-center gap-2"
+              >
+                <LogOut size={18} />
+                Release Vehicle (Cash Payment)
+              </button>
+            )}
           </div>
         </div>
 
