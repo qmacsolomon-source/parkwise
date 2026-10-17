@@ -533,6 +533,11 @@ export default function SlotAssignment() {
                 {reassigning ? 'Reassigning...' : 'Reassign'}
               </button>
             </div>
+            {!newSlotId && (
+              <p className="text-xs text-amber-600 mt-2">
+                Choose a new slot above before reassigning.
+              </p>
+            )}
           </div>
         </div>
       )}

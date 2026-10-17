@@ -889,6 +889,11 @@ export default function UserManagement() {
                 {actionLoading ? 'Resetting...' : 'Reset Password'}
               </button>
             </div>
+            {!newPassword && (
+              <p className="text-xs text-amber-600 mt-2">
+                Enter a new password above first.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -965,6 +970,11 @@ export default function UserManagement() {
                 {actionLoading ? 'Processing...' : 'Confirm'}
               </button>
             </div>
+            {!penaltyReason && (
+              <p className="text-xs text-amber-600 mt-2">
+                Enter a reason above first.
+              </p>
+            )}
           </div>
         </div>
       )}

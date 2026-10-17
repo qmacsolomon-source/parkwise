@@ -600,6 +600,15 @@ export default function CashPayment() {
                       </span>
                     </div>
                   )}
+                  {/* Explains why the button below won't respond -- a disabled
+                      button with no explanation just looks broken. */}
+                  {(!amountReceived || parseFloat(amountReceived) < calculation.total) && (
+                    <p className="text-xs text-amber-600 mt-2">
+                      {!amountReceived
+                        ? `Enter the amount received (at least $${calculation.total.toFixed(2)}) to continue.`
+                        : `Amount received must be at least $${calculation.total.toFixed(2)}.`}
+                    </p>
+                  )}
                 </div>
 
                 {/* Actions */}

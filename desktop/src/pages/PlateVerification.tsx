@@ -475,6 +475,11 @@ export default function PlateVerification() {
                     <CheckCircle size={18} />
                     Accept Vehicle
                   </button>
+                  {!selectedReservation && (
+                    <p className="text-xs text-amber-600 -mt-2">
+                      Select a reservation above first.
+                    </p>
+                  )}
 
                   <button
                     onClick={handleRetryCapture}
