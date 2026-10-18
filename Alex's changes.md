@@ -505,3 +505,21 @@ order by au.created_at desc;
 ```
 
 - then insert a matching `profiles` row by hand for each one (full_name, email, phone, role, status at minimum), same as was done for `marga@gmail.com` this round.
+
+## Round 20: couldn't delete a walk-in customer with no reservation history
+
+### ⚠️ Action required - redeploy the Edge Function
+
+```
+npx supabase functions deploy admin-user-actions
+```
+
+Same one-time deploy pattern as Round 5 - if you're already linked to the project (you should be, from back then), this is the only command needed.
+
+Deleting "Na" (a walk-in customer from Manual Entry testing, zero reservations) from User Management looked like it just silently did nothing - the confirm modal flashed "Deleting..." then reset back to showing the delete button again, no visible error, because the real error message renders near the top of the page and the modal (which correctly stays open on failure) was covering it the whole time. Underneath, it said **"User not found."**
+
+Root cause is in the `admin-user-actions` Edge Function, not the page: hard-deleting a user calls `adminClient.auth.admin.deleteUser(targetUserId)`, which assumes every `profiles` row has a matching `auth.users` login. Walk-in customers never get one - `schema.sql` says so directly: a walk-in's `profiles.id` is just an auto-generated UUID with no matching auth account, by design, since they never log in. So deleting any walk-in with no reservation history (the only case that reaches the hard-delete path at all) was guaranteed to hit Supabase's Auth API asking it to delete a login that was never there, and get "User not found" back every single time.
+
+Fixed by treating that specific error as the expected no-op it actually is for a walk-in, instead of a failure - any other error still fails the request normally. The client's own follow-up `profiles` row delete (which doesn't need the service-role key) was always going to be the part that actually removes a walk-in; now it gets the chance to run instead of being blocked by an auth-delete call that could never succeed for this case.
+
+Left for a future round, not fixed here: the error banner rendering behind the still-open delete modal is its own small bug worth cleaning up, so a real failure (on a user that *does* have an auth account) doesn't look like silent nothing happening the same way this one did.
