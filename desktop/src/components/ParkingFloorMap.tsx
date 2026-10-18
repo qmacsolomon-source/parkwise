@@ -1,5 +1,13 @@
 import { Slot } from '@parkwise/shared';
-import { ArrowUpDown } from 'lucide-react';
+import {
+  ArrowUpDown,
+  ArrowRight,
+  ArrowLeft,
+  CornerDownRight,
+  CornerDownLeft,
+  CornerUpLeft,
+  CornerUpRight,
+} from 'lucide-react';
 
 interface ParkingFloorMapProps {
   slots: Slot[];
@@ -14,31 +22,33 @@ interface ParkingFloorMapProps {
 }
 
 // Same hue mapping as StatusBadge.tsx, just a shade or two more saturated
-// since a 36px map cell needs more contrast than a full-width badge does
-// to still read clearly at a glance.
+// since a small map cell needs more contrast than a full-width badge does
+// to still read clearly at a glance against the gray "asphalt" background.
 const STATUS_CELL_CLASSES: Record<string, string> = {
-  available: 'bg-gray-200 border-gray-400 text-gray-700 hover:bg-gray-300',
-  reserved: 'bg-amber-200 border-amber-500 text-amber-900 hover:bg-amber-300',
-  occupied: 'bg-green-300 border-green-600 text-green-900 hover:bg-green-400',
-  unverified: 'bg-red-300 border-red-600 text-red-900 hover:bg-red-400',
-  overstay: 'bg-red-400 border-red-700 text-red-950 hover:bg-red-500',
-  maintenance: 'bg-orange-300 border-orange-600 text-orange-900 hover:bg-orange-400',
+  available: 'bg-gray-100 border-gray-400 text-gray-600 hover:bg-white',
+  reserved: 'bg-amber-300 border-amber-600 text-amber-900 hover:bg-amber-400',
+  occupied: 'bg-green-400 border-green-700 text-green-950 hover:bg-green-500',
+  unverified: 'bg-red-400 border-red-700 text-red-950 hover:bg-red-500',
+  overstay: 'bg-red-500 border-red-800 text-white hover:bg-red-600',
+  maintenance: 'bg-orange-400 border-orange-700 text-orange-950 hover:bg-orange-500',
 };
 
-function SlotCell({
+function Stall({
   slot,
   isSelected,
   onClick,
   title,
+  horizontal,
 }: {
   slot: Slot;
   isSelected: boolean;
   onClick: () => void;
   title?: string;
+  horizontal?: boolean;
 }) {
   const colorClasses = STATUS_CELL_CLASSES[slot.status] || STATUS_CELL_CLASSES.available;
   // Drop the floor digit the code starts with (e.g. "1A7" -> "A7") -
-  // which floor we're on is already obvious from the page around it.
+  // which floor we're on is already obvious from the corner badges.
   const shortLabel = slot.slot_code.replace(/^\d+/, '');
 
   return (
@@ -47,69 +57,35 @@ function SlotCell({
       onClick={onClick}
       title={title || slot.slot_code}
       aria-label={`Slot ${slot.slot_code}, ${slot.status}${slot.is_pwd ? ', PWD' : ''}`}
-      className={`w-9 h-9 shrink-0 rounded border-2 flex items-center justify-center text-[10px] font-semibold transition-all hover:scale-110 hover:z-10 relative ${colorClasses} ${
-        slot.is_pwd ? 'ring-2 ring-blue-500 ring-offset-1' : ''
-      } ${isSelected ? 'ring-2 ring-primary ring-offset-1 scale-110 z-10' : ''}`}
+      className={`shrink-0 border-2 flex items-center justify-center font-semibold transition-all hover:scale-105 hover:z-10 relative ${
+        horizontal ? 'w-16 h-6 text-[9px] rounded-sm' : 'w-7 h-14 text-[9px] rounded-sm items-end pb-0.5'
+      } ${colorClasses} ${slot.is_pwd ? 'ring-2 ring-blue-500 ring-offset-1' : ''} ${
+        isSelected ? 'ring-2 ring-primary ring-offset-1 scale-105 z-10' : ''
+      }`}
     >
       {shortLabel}
     </button>
   );
 }
 
-function DoubleAisleBlock({
-  label,
-  topRow,
-  bottomRow,
-  selectedSlotId,
-  onSlotClick,
-  getSlotTitle,
-}: {
-  label: string;
-  topRow: Slot[];
-  bottomRow: Slot[];
-  selectedSlotId?: string | null;
-  onSlotClick: (slot: Slot) => void;
-  getSlotTitle?: (slot: Slot) => string | undefined;
-}) {
-  const renderRow = (row: Slot[]) => (
-    <div className="flex gap-1.5">
-      {row.slice(0, 5).map((slot) => (
-        <SlotCell
-          key={slot.id}
-          slot={slot}
-          isSelected={slot.id === selectedSlotId}
-          onClick={() => onSlotClick(slot)}
-          title={getSlotTitle?.(slot)}
-        />
-      ))}
-      {/* Divider gap, matching the support-column/partial-wall split
-          visible between sub-blocks in the reference layout. */}
-      <div className="w-3 flex items-center justify-center">
-        <div className="w-0.5 h-full bg-gray-300" />
-      </div>
-      {row.slice(5, 10).map((slot) => (
-        <SlotCell
-          key={slot.id}
-          slot={slot}
-          isSelected={slot.id === selectedSlotId}
-          onClick={() => onSlotClick(slot)}
-          title={getSlotTitle?.(slot)}
-        />
-      ))}
-    </div>
-  );
+// The thicker vertical bar marking a support column / aisle entry point -
+// the gap between the stall rows and the drive lane in the reference sketch.
+function Divider() {
+  return <div className="w-1.5 self-stretch bg-gray-700/70 rounded-sm shrink-0" />;
+}
 
+function ElevatorStairsIcon() {
   return (
-    <div className="border-2 border-gray-300 rounded-lg p-3 bg-white">
-      <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-2">{label}</p>
-      {renderRow(topRow)}
-      <div className="h-5 flex items-center justify-center text-[9px] text-gray-300 uppercase tracking-widest">
-        aisle
+    <div className="absolute top-3 right-3 w-20 h-14 rounded-sm border-2 border-gray-600 bg-gray-200 overflow-hidden shadow-sm flex flex-col">
+      <div className="h-2 bg-cyan-400 shrink-0" />
+      <div className="flex-1 flex items-center justify-center text-gray-500">
+        <ArrowUpDown size={18} />
       </div>
-      {renderRow(bottomRow)}
     </div>
   );
 }
+
+const ARROW_CLASS = 'text-yellow-400 drop-shadow-[0_1px_1px_rgba(0,0,0,0.35)] pointer-events-none';
 
 export default function ParkingFloorMap({
   slots,
@@ -140,61 +116,87 @@ export default function ParkingFloorMap({
     );
   }
 
+  const renderSlot = (slot: Slot) => (
+    <Stall
+      key={slot.id}
+      slot={slot}
+      isSelected={slot.id === selectedSlotId}
+      onClick={() => onSlotClick(slot)}
+      title={getSlotTitle?.(slot)}
+    />
+  );
+
   return (
-    <div className="border-4 border-gray-400 rounded-xl p-4 bg-gray-50 flex gap-4 overflow-x-auto">
-      <div className="flex-1 flex flex-col gap-4 min-w-[520px]">
-        {/* Entrance strip: compact row + elevator/stairs core (a fixed
-            landmark, not a parking spot - no data behind it). */}
-        <div className="flex gap-4 items-start">
-          <div>
-            <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-2">Compact</p>
-            <div className="flex gap-1.5">
-              {compact.map((slot) => (
-                <SlotCell
-                  key={slot.id}
-                  slot={slot}
-                  isSelected={slot.id === selectedSlotId}
-                  onClick={() => onSlotClick(slot)}
-                  title={getSlotTitle?.(slot)}
-                />
-              ))}
+    <div className="relative border-[10px] border-gray-900 rounded-md bg-gray-400 px-5 pt-16 pb-5 overflow-x-auto select-none">
+      {/* Curb reflector accents at the near-side corners, matching the
+          reference sketch's yellow corner marks. */}
+      <div className="absolute top-0 left-10 w-12 h-1.5 bg-yellow-400" />
+      <div className="absolute bottom-0 left-10 w-12 h-1.5 bg-yellow-400" />
+
+      {/* Floor number, shown top-left and bottom-left like a real garage's
+          painted level markers. */}
+      <div className="absolute top-3 left-4 text-white text-2xl font-extrabold drop-shadow">{floor}</div>
+      <div className="absolute bottom-3 left-4 text-white text-2xl font-extrabold drop-shadow">{floor}</div>
+
+      <ElevatorStairsIcon />
+
+      {/* Entrance strip: compact/PWD stalls, tucked near the elevator core
+          same as before - just restyled to drop the boxed label. */}
+      <div className="flex gap-1 mb-6 ml-10">{compact.map(renderSlot)}</div>
+
+      <div className="flex gap-5 min-w-[760px]">
+        <div className="flex-1 flex flex-col gap-6 pb-10">
+          {/* Top row + inbound flow arrows */}
+          <div className="relative flex items-end gap-2 pt-7">
+            <div className="absolute -top-1 left-2">
+              <CornerDownRight size={18} className={ARROW_CLASS} />
             </div>
+            <div className="absolute -top-1 left-1/2 -translate-x-1/2">
+              <ArrowRight size={18} className={ARROW_CLASS} />
+            </div>
+            <div className="absolute -top-1 right-2">
+              <CornerDownLeft size={18} className={ARROW_CLASS} />
+            </div>
+
+            <Divider />
+            <div className="flex gap-1">{blockATop.map(renderSlot)}</div>
+            <div className="flex gap-1">{blockBTop.map(renderSlot)}</div>
+            <Divider />
           </div>
-          <div className="ml-auto flex items-center gap-2 px-3 py-2 bg-gray-200 rounded-lg border-2 border-gray-400 text-gray-500">
-            <ArrowUpDown size={16} />
-            <span className="text-xs font-medium">Elevator / Stairs</span>
+
+          {/* Drive aisle */}
+          <div className="h-px bg-gray-200/70 mx-2" />
+
+          {/* Bottom row + outbound flow arrows */}
+          <div className="relative flex items-start gap-2 pb-7">
+            <Divider />
+            <div className="flex gap-1">{blockABottom.map(renderSlot)}</div>
+            <div className="flex gap-1">{blockBBottom.map(renderSlot)}</div>
+            <Divider />
+
+            <div className="absolute -bottom-1 left-2">
+              <CornerUpLeft size={18} className={ARROW_CLASS} />
+            </div>
+            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2">
+              <ArrowLeft size={18} className={ARROW_CLASS} />
+            </div>
+            <div className="absolute -bottom-1 right-2">
+              <CornerUpRight size={18} className={ARROW_CLASS} />
+            </div>
           </div>
         </div>
 
-        <DoubleAisleBlock
-          label="Block A"
-          topRow={blockATop}
-          bottomRow={blockABottom}
-          selectedSlotId={selectedSlotId}
-          onSlotClick={onSlotClick}
-          getSlotTitle={getSlotTitle}
-        />
-        <DoubleAisleBlock
-          label="Block B"
-          topRow={blockBTop}
-          bottomRow={blockBBottom}
-          selectedSlotId={selectedSlotId}
-          onSlotClick={onSlotClick}
-          getSlotTitle={getSlotTitle}
-        />
-      </div>
-
-      {/* Side column, running the full height along the far wall. */}
-      <div className="flex flex-col">
-        <p className="text-[10px] font-medium text-gray-400 uppercase tracking-wide mb-2">Side</p>
-        <div className="flex-1 border-l-2 border-dashed border-gray-300 pl-3 flex flex-col justify-between gap-1.5">
+        {/* Side column, running the full height along the far wall as a
+            single-loaded ladder of stalls, no box/label like the sketch. */}
+        <div className="flex flex-col justify-between gap-1.5 py-1 pl-4 border-l border-gray-300/60">
           {side.map((slot) => (
-            <SlotCell
+            <Stall
               key={slot.id}
               slot={slot}
               isSelected={slot.id === selectedSlotId}
               onClick={() => onSlotClick(slot)}
               title={getSlotTitle?.(slot)}
+              horizontal
             />
           ))}
         </div>
