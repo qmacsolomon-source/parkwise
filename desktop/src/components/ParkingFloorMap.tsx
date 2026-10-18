@@ -11,8 +11,12 @@ interface ParkingFloorMapProps {
   getSlotTitle?: (slot: Slot) => string | undefined;
 }
 
+// Used as the label's own text color now that there's no filled badge
+// behind it - "available" needs to read as near-white against the gray
+// asphalt art, where the muted gray used for its old badge fill would be
+// almost invisible as plain text.
 const STATUS_COLORS: Record<string, string> = {
-  available: '#9ca3af',
+  available: '#f1f5f9',
   reserved: '#f59e0b',
   occupied: '#22c55e',
   unverified: '#ef4444',
@@ -154,16 +158,18 @@ function Marker({
         top: pct(box.y, IMAGE_H),
         width: pct(box.w, IMAGE_W),
         height: pct(box.h, IMAGE_H),
+        outline: 'none',
+        boxShadow: 'none',
+        WebkitTapHighlightColor: 'transparent',
       }}
     >
       <span
-        className={`flex items-center justify-center w-full h-full rounded-[3px] text-[10px] font-semibold text-white leading-none whitespace-nowrap overflow-hidden transition-transform group-hover:scale-105 ${
-          isSelected ? 'ring-2 ring-primary ring-offset-1' : ''
-        } ${slot.is_pwd ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+        className={`text-[10px] font-semibold leading-none whitespace-nowrap transition-transform group-hover:scale-110 ${
+          isSelected ? 'underline decoration-2 underline-offset-2 scale-110' : ''
+        }`}
         style={{
-          backgroundColor: color,
-          opacity: slot.status === 'available' ? 0.55 : 0.92,
-          textShadow: '0 1px 1px rgba(0,0,0,0.5)',
+          color,
+          textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.6)',
         }}
       >
         {label}
