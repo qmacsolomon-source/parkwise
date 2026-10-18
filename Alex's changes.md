@@ -458,3 +458,5 @@ Fixed by compositing floor-3's own digit ink (unchanged - just the position was 
 ## Round 16: removed the "PWD Slots Only" filter from Slot Assignment
 
 Dropped per your call - it wasn't reliably showing the right slots, and it's redundant now anyway since every PWD stall already has its own blue wheelchair badge baked right into the map art (Round 11), so there's no real need to filter them out separately. Removed the checkbox, the `filterPwd` state, and the `Filter` icon import that only existed for it; `Refresh` stays as its own control in that card. The slot list and map both go back to showing every slot unfiltered, same as before any PWD filter existed.
+
+Also removed the separate "PWD Slot" checkbox from the "Manage Slot" modal (opens when you click a slot on the map) for the same reason - `is_pwd` isn't something that needs editing per-slot from here anymore. The modal still saves the slot's existing PWD status along with whatever else changes (status), it just doesn't offer a way to flip it from this screen.

@@ -540,17 +540,6 @@ export default function SlotAssignment() {
                   <option value="maintenance">Maintenance</option>
                 </select>
               </div>
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editingSlot.is_pwd}
-                    onChange={(e) => setEditingSlot({ ...editingSlot, is_pwd: e.target.checked })}
-                    className="rounded"
-                  />
-                  <span className="text-sm text-gray-700">PWD Slot</span>
-                </label>
-              </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button
