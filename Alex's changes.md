@@ -351,3 +351,26 @@ Three direct UI complaints, all fixed:
 - **Slot Assignment's layout reordered**: the Slot Map card now comes first and spans the full page width (it was previously squeezed into the right half of a two-column grid, which is what made it look cramped). "Upcoming & Active Reservations" moved below it, now shown as a multi-column card grid instead of a single-column list, so it doesn't feel like wasted space now that it's not fighting the map for width.
 
 Verified live on both pages: List toggle is gone, the map fills the page width on Live Occupancy, the up/down arrows switch floors correctly (confirmed floor number and background image both update), and Slot Assignment's reordered layout still opens the right slot on click ("Manage Slot 1A1").
+
+## Round 11: real hand-marked click zones for all 69 stalls per floor, a coordinate tool to make that possible, and a slot-count correction (34 → 69/floor)
+
+Round 9's click zones were still *my* pixel measurements off the reference image - close, but an estimate, not ground truth. This round replaces that with exact, hand-placed boxes.
+
+### The coordinate-picker tool
+
+Built a separate small web tool (not part of the app - a standalone page) that loads each floor's real image and lets you drag a box over every actual stall, one at a time, then exports the exact pixel coordinates as JSON. Iterated on it a few rounds based on direct feedback:
+- Ctrl/Cmd+C a box's size, hover the next stall, Ctrl/Cmd+V to stamp a same-size box there instead of redrawing each one
+- Drag any existing box to reposition it; arrow keys nudge the selected box/group by 1px (10px with Shift) for fine alignment
+- A "Select" mode button to drag-select a group of boxes at once, then copy/paste or move the whole group together with spacing preserved - right-click-drag and Shift+drag also work as alternates where the browser/input device supports them, but the button doesn't depend on either
+
+You used it to mark all 69 real stalls on floor 1 (60 in the main block - 5 rows of 12, not the 2 rows this app previously assumed - plus 9 along the side wall) and exported the coordinates.
+
+### ⚠️ Action required on the live Supabase project - one file, once
+
+Marking the real stalls turned up a second correction: the actual layout is **69 slots per floor** (207 total), not the 34/floor from Round 9 - 5 rows of 12 in the main block (not 2 rows of 12), and 9 along the side wall (not 10). `database/migrate_hand_marked_layout.sql` (new, one-time) replaces the old layout with the correct one. Same safety check as every prior migration this project has used: confirmed zero reservations and zero payments reference any slot before writing a clean delete + recreate. Run it once in the Supabase SQL Editor; `seed.sql` is updated to match for fresh installs.
+
+Per your call: floors 2 and 3 reuse floor 1's exact hand-marked box layout rather than being marked separately - the real garage is the same physical layout on every floor, and the stall images differ from each other by only a few pixels (confirmed by measurement in Round 9), so re-marking two more floors by hand wasn't worth repeating. Same reasoning applies to PWD placement (columns 8-12 of each main-block row, side-column positions 1-5) - identical on all three floors.
+
+### `ParkingFloorMap.tsx`
+
+Replaced the measured-coordinate layout config with the 69 hand-marked boxes (60 main + 9 side), shared across all three floors, each zipped against its matching real slot by `zone_col` (1-60 for `block_a`, 1-9 for `side`) in the same reading order the boxes were drawn in. Verified live against the pre-migration data (so far only 24 real `block_a` slots exist) - markers land exactly on the real stalls, with the gap in unmarked rows showing cleanly rather than breaking, and clicking still opens the correct slot ("1A13 Details"). Full 69/floor fill confirmed once the migration above is run.
