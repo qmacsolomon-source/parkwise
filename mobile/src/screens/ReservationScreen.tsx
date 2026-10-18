@@ -1,16 +1,34 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Modal, DateTimePicker } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Alert, Modal, TextInput } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Vehicle, Reservation } from '@parkwise/shared';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, NavigationProp, RouteProp } from '@react-navigation/native';
+
+type RootStackParamList = {
+  Dashboard: undefined;
+  Reservation: { slot: Slot };
+  Timer: undefined;
+  Notifications: undefined;
+  History: undefined;
+  Settings: undefined;
+  Help: undefined;
+};
+
+const formatTime = (date: Date) => {
+  return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+};
+
+const formatDate = (date: Date) => {
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 export default function ReservationScreen() {
   const { profile } = useAuth();
-  const navigation = useNavigation();
-  const route = useRoute();
-  const { slot } = route.params as { slot: Slot };
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const route = useRoute<RouteProp<RootStackParamList, 'Reservation'>>();
+  const { slot } = route.params;
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState<Vehicle | null>(null);
@@ -19,12 +37,16 @@ export default function ReservationScreen() {
   const [loading, setLoading] = useState(false);
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+  const [startTextInput, setStartTextInput] = useState(formatTime(new Date()));
+  const [endTextInput, setEndTextInput] = useState(formatTime(new Date(Date.now() + 60 * 60 * 1000)));
 
   React.useEffect(() => {
     loadVehicles();
   }, []);
 
   const loadVehicles = async () => {
+    if (!supabase) return;
+
     const { data, error } = await supabase
       .from('vehicles')
       .select('*')
@@ -46,6 +68,11 @@ export default function ReservationScreen() {
 
     if (endTime <= startTime) {
       Alert.alert('Error', 'End time must be after start time');
+      return;
+    }
+
+    if (!supabase) {
+      Alert.alert('Error', 'Supabase is not configured');
       return;
     }
 
@@ -79,14 +106,6 @@ export default function ReservationScreen() {
     }
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const formatDate = (date: Date) => {
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
   return (
     <View style={styles.container}>
       <ScrollView style={styles.content}>
@@ -117,26 +136,22 @@ export default function ReservationScreen() {
 
           <View style={styles.section}>
             <Text style={styles.label}>Start Time</Text>
-            <TouchableOpacity
-              style={styles.timeButton}
-              onPress={() => setShowStartPicker(true)}
-            >
-              <Text style={styles.timeText}>
-                {formatDate(startTime)} at {formatTime(startTime)}
-              </Text>
-            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              value={startTextInput}
+              onChangeText={setStartTextInput}
+              placeholder="HH:MM AM/PM"
+            />
           </View>
 
           <View style={styles.section}>
             <Text style={styles.label}>End Time</Text>
-            <TouchableOpacity
-              style={styles.timeButton}
-              onPress={() => setShowEndPicker(true)}
-            >
-              <Text style={styles.timeText}>
-                {formatDate(endTime)} at {formatTime(endTime)}
-              </Text>
-            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              value={endTextInput}
+              onChangeText={setEndTextInput}
+              placeholder="HH:MM AM/PM"
+            />
           </View>
 
           <TouchableOpacity
@@ -150,58 +165,6 @@ export default function ReservationScreen() {
           </TouchableOpacity>
         </View>
       </ScrollView>
-
-      <Modal
-        visible={showStartPicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowStartPicker(false)}
-      >
-        <View style={styles.pickerContainer}>
-          <View style={styles.pickerContent}>
-            <DateTimePicker
-              value={startTime}
-              mode="datetime"
-              onChange={(event, date) => {
-                setShowStartPicker(false);
-                if (date) setStartTime(date);
-              }}
-            />
-            <TouchableOpacity
-              style={styles.pickerButton}
-              onPress={() => setShowStartPicker(false)}
-            >
-              <Text style={styles.pickerButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showEndPicker}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowEndPicker(false)}
-      >
-        <View style={styles.pickerContainer}>
-          <View style={styles.pickerContent}>
-            <DateTimePicker
-              value={endTime}
-              mode="datetime"
-              onChange={(event, date) => {
-                setShowEndPicker(false);
-                if (date) setEndTime(date);
-              }}
-            />
-            <TouchableOpacity
-              style={styles.pickerButton}
-              onPress={() => setShowEndPicker(false)}
-            >
-              <Text style={styles.pickerButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -270,16 +233,15 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
   },
-  timeButton: {
+  input: {
     backgroundColor: colors.background,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
-  },
-  timeText: {
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
     fontSize: fontSize.md,
     color: colors.text,
+    minHeight: 48,
   },
   button: {
     backgroundColor: colors.primary,
@@ -296,29 +258,6 @@ const styles = StyleSheet.create({
   buttonText: {
     color: colors.surface,
     fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  pickerContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  pickerContent: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: borderRadius.lg,
-    borderTopRightRadius: borderRadius.lg,
-    padding: spacing.lg,
-  },
-  pickerButton: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.md,
-  },
-  pickerButtonText: {
-    fontSize: fontSize.md,
-    color: colors.primary,
     fontWeight: '600',
   },
 });

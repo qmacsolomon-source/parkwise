@@ -34,37 +34,30 @@ export const authService = {
         data: {
           full_name: credentials.full_name,
           phone: credentials.phone,
-          plate_number: credentials.plate_number,
-          pwd_permit_number: credentials.pwd_permit_number,
         },
         emailRedirectTo: undefined,
       },
     });
 
     if (error) throw error;
-    
-    // Create profile entry
-    if (data.user) {
-      const { error: profileError } = await supabase
-        .from('profiles')
+
+    // Database trigger handle_new_user() will create the profile with role='customer'
+    // After signup, insert the customer's vehicle if plate number provided
+    if (data.user && credentials.plate_number) {
+      const { error: vehicleError } = await supabase
+        .from('vehicles')
         .insert({
-          id: data.user.id,
-          full_name: credentials.full_name,
-          email: credentials.email,
-          phone: credentials.phone,
-          plate_number: credentials.plate_number?.toUpperCase(),
-          pwd_permit_number: credentials.pwd_permit_number || null,
-          role: 'customer',
-          pwd_verified: false,
-          status: 'active',
+          owner_id: data.user.id,
+          plate_number: credentials.plate_number.toUpperCase(),
+          is_pwd: !!credentials.pwd_permit_number,
         });
 
-      if (profileError) {
-        console.error('Profile creation error:', profileError);
-        throw profileError;
+      if (vehicleError) {
+        console.error('Vehicle creation error:', vehicleError);
+        // Don't throw - profile is created, vehicle can be added later
       }
     }
-    
+
     return data;
   },
 

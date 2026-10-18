@@ -4,11 +4,21 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Vehicle } from '@parkwise/shared';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
+
+type RootStackParamList = {
+  Dashboard: undefined;
+  Reservation: { slot: Slot };
+  Timer: undefined;
+  Notifications: undefined;
+  History: undefined;
+  Settings: undefined;
+  Help: undefined;
+};
 
 export default function DashboardScreen() {
   const { profile, logout } = useAuth();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -16,6 +26,8 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
+    if (!supabase) return;
+
     loadData();
 
     const slotsSubscription = supabase
@@ -51,6 +63,12 @@ export default function DashboardScreen() {
   }, []);
 
   const loadData = async () => {
+    if (!supabase) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
       const [slotsData, reservationsData, vehiclesData] = await Promise.all([
         supabase.from('slots').select('*').order('slot_code'),
@@ -122,6 +140,58 @@ export default function DashboardScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
+        {/* Quick Actions */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <View style={styles.quickActionsContainer}>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('Timer')}
+              accessibilityLabel="View active parking timer"
+              accessibilityRole="button"
+            >
+              <Text style={styles.quickActionIcon}>⏱️</Text>
+              <Text style={styles.quickActionLabel}>Timer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('Notifications')}
+              accessibilityLabel="View notifications"
+              accessibilityRole="button"
+            >
+              <Text style={styles.quickActionIcon}>🔔</Text>
+              <Text style={styles.quickActionLabel}>Alerts</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('History')}
+              accessibilityLabel="View parking history"
+              accessibilityRole="button"
+            >
+              <Text style={styles.quickActionIcon}>📋</Text>
+              <Text style={styles.quickActionLabel}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('Settings')}
+              accessibilityLabel="Open settings"
+              accessibilityRole="button"
+            >
+              <Text style={styles.quickActionIcon}>⚙️</Text>
+              <Text style={styles.quickActionLabel}>Settings</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.quickActionButton}
+              onPress={() => navigation.navigate('Help')}
+              accessibilityLabel="Get help and support"
+              accessibilityRole="button"
+            >
+              <Text style={styles.quickActionIcon}>❓</Text>
+              <Text style={styles.quickActionLabel}>Help</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Available Slots ({getAvailableSlots().length})</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.slotsContainer}>
@@ -129,7 +199,7 @@ export default function DashboardScreen() {
               <TouchableOpacity
                 key={slot.id}
                 style={[styles.slotCard, slot.is_pwd && styles.pwdSlot]}
-                onPress={() => navigation.navigate('Reservation' as never, { slot } as never)}
+                onPress={() => navigation.navigate('Reservation', { slot })}
               >
                 <Text style={styles.slotCode}>{slot.slot_code}</Text>
                 {slot.is_pwd && <Text style={styles.pwdLabel}>PWD</Text>}
@@ -221,6 +291,34 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: spacing.xl,
+  },
+  quickActionsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+  },
+  quickActionButton: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    alignItems: 'center',
+    width: '30%',
+    minWidth: 80,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  quickActionIcon: {
+    fontSize: 24,
+    marginBottom: spacing.xs,
+  },
+  quickActionLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    color: colors.primary,
+    textAlign: 'center',
   },
   sectionTitle: {
     fontSize: fontSize.lg,

@@ -1,10 +1,18 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { isConfigured } from '@parkwise/shared';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
 
-export default function LoginScreen({ navigation }: any) {
+type RootStackParamList = {
+  Login: undefined;
+  Registration: undefined;
+};
+
+export default function LoginScreen() {
   const { login, resetPassword } = useAuth();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -80,10 +88,19 @@ export default function LoginScreen({ navigation }: any) {
           <Text style={styles.title}>ParkWise</Text>
           <Text style={styles.subtitle}>Customer App</Text>
 
+          {!isConfigured && (
+            <View style={styles.configWarning}>
+              <Text style={styles.configWarningText}>⚠️ Supabase is not configured</Text>
+              <Text style={styles.configWarningSubtext}>
+                Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file
+              </Text>
+            </View>
+          )}
+
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Email or Phone</Text>
             <TextInput
-              style={[styles.input, errors.identifier && styles.inputError]}
+              style={errors.identifier ? [styles.input, styles.inputError] : styles.input}
               placeholder="juan@example.com or 09123456789"
               placeholderTextColor="#9CA3AF"
               value={identifier}
@@ -99,7 +116,7 @@ export default function LoginScreen({ navigation }: any) {
             <Text style={styles.label}>Password</Text>
             <View style={styles.passwordContainer}>
               <TextInput
-                style={[styles.input, styles.passwordInput, errors.password && styles.inputError]}
+                style={errors.password ? [styles.input, styles.passwordInput, styles.inputError] : [styles.input, styles.passwordInput]}
                 placeholder="Enter password"
                 placeholderTextColor="#9CA3AF"
                 value={password}
@@ -244,6 +261,24 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.xl,
+  },
+  configWarning: {
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  configWarningText: {
+    fontSize: fontSize.md,
+    fontWeight: '600',
+    color: '#EF4444',
+    marginBottom: spacing.xs,
+  },
+  configWarningSubtext: {
+    fontSize: fontSize.sm,
+    color: '#7F1D1D',
   },
   inputGroup: {
     marginBottom: spacing.md,
