@@ -7,7 +7,7 @@ import ParkingFloorMap from '../components/ParkingFloorMap';
 import FloorSwitcher from '../components/FloorSwitcher';
 import {
   MapPin, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
-  RefreshCw, Settings, Clock, User, Car
+  RefreshCw, Clock, User, Car
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
@@ -352,24 +352,7 @@ export default function SlotAssignment() {
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
-            <div className="flex items-center gap-3">
-              <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    const onThisFloor = slots.filter(s => s.floor === floor);
-                    if (onThisFloor.length > 0) {
-                      setEditingSlot(onThisFloor[0]);
-                      setShowSlotSettings(true);
-                    }
-                  }}
-                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
-                >
-                  <Settings size={16} />
-                  Manage Slots
-                </button>
-              )}
-            </div>
+            <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
           </div>
           <div>
             <ParkingFloorMap
