@@ -49,8 +49,16 @@ export default function AccountCreation() {
       return false;
     }
 
+    // Trimmed, not the raw field value: ordinary leading/trailing spaces
+    // would already fail the regex below, but some invisible/zero-width
+    // characters (the kind that sneak in through copy-pasting an address
+    // across several different apps) aren't \s and can slip through this
+    // check while still getting rejected by Supabase's own, stricter
+    // validation - trimming here doesn't strip those, but keeping this
+    // value and the one actually submitted below in sync is still correct
+    // on its own.
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(email.trim())) {
       setError('Invalid email format');
       return false;
     }
@@ -81,7 +89,7 @@ export default function AccountCreation() {
       const { data: existingEmail } = await supabase
         .from('profiles')
         .select('email')
-        .eq('email', email.toLowerCase())
+        .eq('email', email.trim().toLowerCase())
         .single();
 
       if (existingEmail) {
@@ -99,7 +107,7 @@ export default function AccountCreation() {
 
       // Create user using Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
+        email: email.trim().toLowerCase(),
         password: password,
         options: {
           data: {
@@ -144,7 +152,7 @@ export default function AccountCreation() {
           .upsert({
             id: authData.user.id,
             full_name: fullName,
-            email: email.toLowerCase(),
+            email: email.trim().toLowerCase(),
             phone: '',
             role: role,
             status: 'active',
@@ -166,7 +174,7 @@ export default function AccountCreation() {
         action: 'account_created',
         details: {
           new_user_id: authData.user?.id,
-          email: email.toLowerCase(),
+          email: email.trim().toLowerCase(),
           full_name: fullName,
           role: role,
         },
