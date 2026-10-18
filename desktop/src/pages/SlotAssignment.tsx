@@ -40,10 +40,8 @@ export default function SlotAssignment() {
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
   const [showSlotSettings, setShowSlotSettings] = useState(false);
   const [floor, setFloor] = useState(1);
-  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
 
   const handleFloorChange = (newFloor: number) => {
-    setFloorDirection(newFloor > floor ? 'up' : 'down');
     setFloor(newFloor);
   };
 
@@ -391,7 +389,7 @@ export default function SlotAssignment() {
               )}
             </div>
           </div>
-          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+          <div>
             <ParkingFloorMap
               slots={filteredSlots}
               floor={floor}

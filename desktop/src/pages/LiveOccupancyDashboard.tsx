@@ -37,10 +37,8 @@ export default function LiveOccupancyDashboard() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
   const [floor, setFloor] = useState(1);
-  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
 
   const handleFloorChange = (newFloor: number) => {
-    setFloorDirection(newFloor > floor ? 'up' : 'down');
     setFloor(newFloor);
   };
 
@@ -351,7 +349,7 @@ export default function LiveOccupancyDashboard() {
           <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
         </div>
 
-        <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+        <div>
           <ParkingFloorMap
             slots={filteredSlots}
             floor={floor}

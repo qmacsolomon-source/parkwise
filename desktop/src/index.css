@@ -77,21 +77,3 @@
   }
 }
 
-/* Floor-switch transition for ParkingFloorMap (LiveOccupancyDashboard /
-   SlotAssignment): the incoming floor's map rises into view when going to
-   a higher floor, and descends into view when going to a lower one -
-   mirrors the "which way did we just move" an elevator gives you. */
-@keyframes floor-slide-up {
-  from { transform: translateY(24px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-@keyframes floor-slide-down {
-  from { transform: translateY(-24px); opacity: 0; }
-  to { transform: translateY(0); opacity: 1; }
-}
-.animate-floor-up {
-  animation: floor-slide-up 0.3s ease-out;
-}
-.animate-floor-down {
-  animation: floor-slide-down 0.3s ease-out;
-}
