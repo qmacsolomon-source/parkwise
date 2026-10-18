@@ -374,3 +374,7 @@ Per your call: floors 2 and 3 reuse floor 1's exact hand-marked box layout rathe
 ### `ParkingFloorMap.tsx`
 
 Replaced the measured-coordinate layout config with the 69 hand-marked boxes (60 main + 9 side), shared across all three floors, each zipped against its matching real slot by `zone_col` (1-60 for `block_a`, 1-9 for `side`) in the same reading order the boxes were drawn in. Verified live against the pre-migration data (so far only 24 real `block_a` slots exist) - markers land exactly on the real stalls, with the gap in unmarked rows showing cleanly rather than breaking, and clicking still opens the correct slot ("1A13 Details"). Full 69/floor fill confirmed once the migration above is run.
+
+### Markers: plain "floor-spot" text instead of an unlabeled dot
+
+The colored-dot markers from Round 9/10 were deliberately unlabeled (to match the reference image's clean, label-free look), but with 69 real stalls on screen at once that's not readable - you can't tell which dot is which without hovering each one. Replaced the dot with a small colored label reading **floor-spot**, e.g. `1-1` through `1-69` on floor 1, one continuous count across the main block then the side column (not the real slot code like `1A1`/`1S4`, which still exists underneath and is what's actually stored/used everywhere else - dropdowns, logs, receipts, search). Clicking still opens the correct slot ("1A2 Details" for the box labeled "1-2") - only the on-map label changed. Verified live: all 69 labels render clearly, colored by status, PWD slots still ring blue.

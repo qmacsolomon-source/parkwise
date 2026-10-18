@@ -131,12 +131,14 @@ function Marker({
   onClick,
   title,
   box,
+  label,
 }: {
   slot: Slot;
   isSelected: boolean;
   onClick: () => void;
   title?: string;
   box: Box;
+  label: string;
 }) {
   const color = STATUS_COLORS[slot.status] || STATUS_COLORS.available;
 
@@ -155,11 +157,17 @@ function Marker({
       }}
     >
       <span
-        className={`block w-[55%] h-[55%] rounded-full transition-transform group-hover:scale-125 ${
+        className={`flex items-center justify-center w-full h-full rounded-[3px] text-[10px] font-semibold text-white leading-none whitespace-nowrap overflow-hidden transition-transform group-hover:scale-105 ${
           isSelected ? 'ring-2 ring-primary ring-offset-1' : ''
         } ${slot.is_pwd ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
-        style={{ backgroundColor: color, opacity: slot.status === 'available' ? 0.45 : 0.9 }}
-      />
+        style={{
+          backgroundColor: color,
+          opacity: slot.status === 'available' ? 0.55 : 0.92,
+          textShadow: '0 1px 1px rgba(0,0,0,0.5)',
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
@@ -188,7 +196,13 @@ export default function ParkingFloorMap({
     );
   }
 
-  const renderSlot = (slot: Slot, box: Box | undefined) => {
+  // Plain "floor-spot" label (1-1, 1-2, ... 1-69) instead of the real slot
+  // code (1A1, 1S4, ...) - a simpler number an attendant can read at a
+  // glance on the map, one continuous sequence across the main block then
+  // the side column. Offset by the fixed box-list length (not the live
+  // slot count), so the numbering stays stable even while data is still
+  // filling in.
+  const renderSlot = (slot: Slot, box: Box | undefined, spotNumber: number) => {
     if (!box) return null;
     return (
       <Marker
@@ -198,6 +212,7 @@ export default function ParkingFloorMap({
         onClick={() => onSlotClick(slot)}
         title={getSlotTitle?.(slot)}
         box={box}
+        label={`${floor}-${spotNumber}`}
       />
     );
   };
@@ -207,8 +222,8 @@ export default function ParkingFloorMap({
       <div className="relative rounded-md overflow-hidden">
         <img src={image} alt={`Floor ${floor} layout`} className="block w-full h-auto select-none" draggable={false} />
         <div className="absolute inset-0">
-          {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i]))}
-          {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i]))}
+          {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i], i + 1))}
+          {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i], MAIN_BOXES.length + i + 1))}
         </div>
       </div>
     </div>
