@@ -7,9 +7,8 @@ import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/share
 import {
   LayoutDashboard, LogOut, RefreshCw, Search,
   AlertTriangle, Car, Clock, User, X, Volume2, VolumeX,
-  CheckCircle, XCircle, AlertCircle, ParkingCircle,
+  CheckCircle, ParkingCircle,
   Accessibility, ChevronRight, Camera, FileText,
-  LayoutGrid, List
 } from 'lucide-react';
 import ParkingFloorMap from '../components/ParkingFloorMap';
 import FloorSwitcher from '../components/FloorSwitcher';
@@ -37,8 +36,6 @@ export default function LiveOccupancyDashboard() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
-  const [now, setNow] = useState(new Date());
-  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
   const [floor, setFloor] = useState(1);
   const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
 
@@ -47,14 +44,6 @@ export default function LiveOccupancyDashboard() {
     setFloor(newFloor);
   };
 
-  // Drives the live H:M:S countdown on each occupied slot's card -- without
-  // this, getTimeRemaining() only ever recomputes when something else
-  // happens to trigger a re-render (a realtime update, a filter change),
-  // so the displayed time just sits there looking frozen in between.
-  useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(interval);
-  }, []);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Calculate summary stats
@@ -258,54 +247,6 @@ export default function LiveOccupancyDashboard() {
     setShowDrawer(true);
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'available': return <ParkingCircle className="text-green-600" size={20} />;
-      case 'occupied': return <CheckCircle className="text-blue-600" size={20} />;
-      case 'reserved': return <Clock className="text-amber-600" size={20} />;
-      case 'overstay': return <AlertTriangle className="text-red-600" size={20} />;
-      case 'unverified': return <XCircle className="text-red-600" size={20} />;
-      default: return <AlertCircle className="text-gray-600" size={20} />;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'available': return 'bg-green-100 text-green-800 border-green-200';
-      case 'occupied': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'reserved': return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'overstay': return 'bg-red-100 text-red-800 border-red-200';
-      case 'unverified': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getSlotBorder = (slot: Slot) => {
-    if (slot.status === 'overstay' || slot.status === 'unverified') {
-      return 'border-2 border-red-500 animate-pulse';
-    }
-    return 'border border-gray-200';
-  };
-
-  const getTimeRemaining = (slot: Slot) => {
-    if (!slot.current_reservation_id) return null;
-    const reservation = reservations[slot.current_reservation_id];
-    if (!reservation) return null;
-
-    const endTime = new Date(reservation.end_time);
-    const diff = endTime.getTime() - now.getTime();
-
-    if (diff <= 0) return 'Expired';
-
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -404,110 +345,29 @@ export default function LiveOccupancyDashboard() {
           </div>
         </div>
 
-        {/* Map / List toggle + floor switcher */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
-          <div className="flex items-center gap-1 bg-white border border-gray-200 rounded-lg p-1 shadow-card w-fit">
-            <button
-              onClick={() => setViewMode('map')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'map' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <LayoutGrid size={16} /> Map
-            </button>
-            <button
-              onClick={() => setViewMode('list')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                viewMode === 'list' ? 'bg-primary text-white' : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <List size={16} /> List
-            </button>
-          </div>
-          {viewMode === 'map' && (
-            <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
-          )}
+        {/* Floor switcher */}
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900">Parking Map</h2>
+          <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
         </div>
 
-        {viewMode === 'map' ? (
-          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
-            <ParkingFloorMap
-              slots={filteredSlots}
-              floor={floor}
-              onSlotClick={handleSlotClick}
-              selectedSlotId={selectedSlot?.id}
-              getSlotTitle={(slot) => {
-                const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
-                const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
-                const customer = vehicle ? customers[vehicle.owner_id] : null;
-                if (!vehicle) return `${slot.slot_code} - ${slot.status}`;
-                return `${slot.slot_code} - ${vehicle.plate_number}${customer ? ` - ${customer.full_name}` : ''}`;
-              }}
-            />
-          </div>
-        ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredSlots.map(slot => {
-            const agentState = agentStates[slot.id];
-            const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
-            const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
-            const customer = vehicle ? customers[vehicle.owner_id] : null;
-            const timeRemaining = getTimeRemaining(slot);
-
-            return (
-              <div
-                key={slot.id}
-                onClick={() => handleSlotClick(slot)}
-                className={`card cursor-pointer hover:shadow-lg transition-shadow ${getSlotBorder(slot)}`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-primary">{slot.slot_code}</span>
-                    {slot.is_pwd && (
-                      <Accessibility className="text-info" size={16} />
-                    )}
-                  </div>
-                  {getStatusIcon(slot.status)}
-                </div>
-
-                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium mb-3 ${getStatusColor(slot.status)}`}>
-                  {slot.status}
-                </div>
-
-                {vehicle && (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex items-center gap-1 text-gray-700">
-                      <Car size={14} />
-                      <span className="font-medium">{vehicle.plate_number}</span>
-                    </div>
-                    {customer && (
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <User size={14} />
-                        <span>{customer.full_name}</span>
-                      </div>
-                    )}
-                    {timeRemaining && (
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Clock size={14} />
-                        <span>{timeRemaining}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {agentState && agentState.state === 'verifying' && (
-                  <div className="mt-3 text-xs text-amber-600 flex items-center gap-1">
-                    <RefreshCw size={12} className="animate-spin" />
-                    Verifying...
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+          <ParkingFloorMap
+            slots={filteredSlots}
+            floor={floor}
+            onSlotClick={handleSlotClick}
+            selectedSlotId={selectedSlot?.id}
+            getSlotTitle={(slot) => {
+              const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
+              const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
+              const customer = vehicle ? customers[vehicle.owner_id] : null;
+              if (!vehicle) return `${slot.slot_code} - ${slot.status}`;
+              return `${slot.slot_code} - ${vehicle.plate_number}${customer ? ` - ${customer.full_name}` : ''}`;
+            }}
+          />
         </div>
-        )}
 
-        {viewMode === 'list' && filteredSlots.length === 0 && (
+        {filteredSlots.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <ParkingCircle size={48} className="mx-auto mb-4 opacity-50" />
             <p>No slots match your filters</p>

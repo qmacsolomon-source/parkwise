@@ -157,8 +157,8 @@ export default function ParkingFloorMap({
     });
 
   return (
-    <div className="max-w-full overflow-x-auto">
-      <div className="relative inline-block rounded-md overflow-hidden" style={{ width: 820 }}>
+    <div className="w-full max-w-[1600px] mx-auto">
+      <div className="relative rounded-md overflow-hidden">
         <img src={layout.image} alt={`Floor ${floor} layout`} className="block w-full h-auto select-none" draggable={false} />
         <div className="absolute inset-0" style={{ aspectRatio: `${IMAGE_W} / ${IMAGE_H}` }}>
           {renderRow(topRow, layout.topRowY)}

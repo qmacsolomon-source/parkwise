@@ -340,3 +340,14 @@ Along the way, counting the stalls actually drawn in the reference images (12 pe
 This is a clean delete + recreate, not a history-preserving remap like Round 7's migration - confirmed safe by querying the live project first: **zero reservations and zero payments reference any slot** right now, so nothing's at risk. Run `database/migrate_shrink_to_reference_layout.sql` once in the Supabase SQL Editor; `seed.sql` is also updated so a fresh install seeds the 34/floor layout directly.
 
 Verified live both before and after checking the data: the map correctly shows markers only for slots that actually exist (10+10 main-row dots pre-migration, since Round 7's data only went up to column 10), clicking a dot opens the right slot ("Manage Slot 1A1"), and the dot-to-tick alignment holds up under zoom.
+
+## Round 10: map layout cleanup - bigger, simpler floor switching, better use of screen space
+
+Three direct UI complaints, all fixed:
+
+- **Live Occupancy's Map/List toggle is gone** - the old card-grid "List" view (a separate way of browsing the same slots as plain cards) added a layer of UI without adding function the map doesn't already cover, so it's removed along with the now-dead code it only existed to feed (the live H:M:S countdown ticker, per-card status icon/color helpers - none of that was used anywhere else). Map is now the only view.
+- **The map is much bigger.** `ParkingFloorMap.tsx` no longer renders at a fixed 820px - it now scales to fill whatever width its container gives it (up to 1600px), so on Live Occupancy it fills the full page width instead of sitting in a small box with empty space around it. The same component automatically sizes down correctly inside Slot Assignment's narrower card too, since it's all percentage-based now.
+- **Floor switching is just two small arrows now.** `FloorSwitcher.tsx` dropped the "Floor 1 / Floor 2 / Floor 3" tab buttons entirely - it's now an up/down chevron pair with a compact "Floor N" label between them, taking a fraction of the space the old tab row did.
+- **Slot Assignment's layout reordered**: the Slot Map card now comes first and spans the full page width (it was previously squeezed into the right half of a two-column grid, which is what made it look cramped). "Upcoming & Active Reservations" moved below it, now shown as a multi-column card grid instead of a single-column list, so it doesn't feel like wasted space now that it's not fighting the map for width.
+
+Verified live on both pages: List toggle is gone, the map fills the page width on Live Occupancy, the up/down arrows switch floors correctly (confirmed floor number and background image both update), and Slot Assignment's reordered layout still opens the right slot on click ("Manage Slot 1A1").

@@ -368,109 +368,107 @@ export default function SlotAssignment() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Reservations List */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming & Active Reservations</h2>
-            {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading...</div>
-            ) : reservations.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">No reservations found</div>
-            ) : (
-              <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {reservations.map((reservation) => (
-                  <div
-                    key={reservation.id}
-                    className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm font-semibold text-gray-900">
-                            Slot {reservation.slot_code}
+        {/* Slot Map */}
+        <div className="card mb-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
+            <div className="flex items-center gap-3">
+              <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
+              {isAdmin && (
+                <button
+                  onClick={() => {
+                    const onThisFloor = filteredSlots.filter(s => s.floor === floor);
+                    if (onThisFloor.length > 0) {
+                      setEditingSlot(onThisFloor[0]);
+                      setShowSlotSettings(true);
+                    }
+                  }}
+                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
+                >
+                  <Settings size={16} />
+                  Manage Slots
+                </button>
+              )}
+            </div>
+          </div>
+          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+            <ParkingFloorMap
+              slots={filteredSlots}
+              floor={floor}
+              selectedSlotId={editingSlot?.id}
+              onSlotClick={(slot) => {
+                if (isAdmin) {
+                  setEditingSlot(slot);
+                  setShowSlotSettings(true);
+                }
+              }}
+              getSlotTitle={(slot) => `${slot.slot_code} - ${slot.status}${slot.is_pwd ? ' (PWD)' : ''}`}
+            />
+          </div>
+        </div>
+
+        {/* Reservations List */}
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming & Active Reservations</h2>
+          {loading ? (
+            <div className="text-center py-8 text-gray-500">Loading...</div>
+          ) : reservations.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">No reservations found</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[600px] overflow-y-auto">
+              {reservations.map((reservation) => (
+                <div
+                  key={reservation.id}
+                  className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-semibold text-gray-900">
+                          Slot {reservation.slot_code}
+                        </span>
+                        <span className={`px-2 py-0.5 text-xs rounded-full ${
+                          reservation.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {reservation.status}
+                        </span>
+                        {reservation.is_pwd && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
+                            PWD
                           </span>
-                          <span className={`px-2 py-0.5 text-xs rounded-full ${
-                            reservation.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {reservation.status}
-                          </span>
-                          {reservation.is_pwd && (
-                            <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
-                              PWD
-                            </span>
-                          )}
+                        )}
+                      </div>
+                      <div className="space-y-1 text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <User size={14} />
+                          <span>{reservation.customer_name}</span>
                         </div>
-                        <div className="space-y-1 text-sm text-gray-600">
-                          <div className="flex items-center gap-2">
-                            <User size={14} />
-                            <span>{reservation.customer_name}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Car size={14} />
-                            <span>{reservation.vehicle_plate}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Clock size={14} />
-                            <span>
-                              {new Date(reservation.start_time).toLocaleString()} - {new Date(reservation.end_time).toLocaleString()}
-                            </span>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          <Car size={14} />
+                          <span>{reservation.vehicle_plate}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock size={14} />
+                          <span>
+                            {new Date(reservation.start_time).toLocaleString()} - {new Date(reservation.end_time).toLocaleString()}
+                          </span>
                         </div>
                       </div>
-                      <button
-                        onClick={() => {
-                          setSelectedReservation(reservation);
-                          setShowReassignModal(true);
-                        }}
-                        className="ml-4 px-3 py-1 text-sm bg-primary text-white rounded hover:bg-primary-dark"
-                      >
-                        Reassign
-                      </button>
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Slot Map */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-              <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
-              <div className="flex items-center gap-3">
-                <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
-                {isAdmin && (
                   <button
                     onClick={() => {
-                      const onThisFloor = filteredSlots.filter(s => s.floor === floor);
-                      if (onThisFloor.length > 0) {
-                        setEditingSlot(onThisFloor[0]);
-                        setShowSlotSettings(true);
-                      }
+                      setSelectedReservation(reservation);
+                      setShowReassignModal(true);
                     }}
-                    className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
+                    className="mt-3 w-full px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary-dark"
                   >
-                    <Settings size={16} />
-                    Manage Slots
+                    Reassign
                   </button>
-                )}
-              </div>
+                </div>
+              ))}
             </div>
-            <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
-              <ParkingFloorMap
-                slots={filteredSlots}
-                floor={floor}
-                selectedSlotId={editingSlot?.id}
-                onSlotClick={(slot) => {
-                  if (isAdmin) {
-                    setEditingSlot(slot);
-                    setShowSlotSettings(true);
-                  }
-                }}
-                getSlotTitle={(slot) => `${slot.slot_code} - ${slot.status}${slot.is_pwd ? ' (PWD)' : ''}`}
-              />
-            </div>
-          </div>
+          )}
         </div>
       </div>
 
