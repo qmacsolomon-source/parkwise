@@ -226,7 +226,13 @@ export default function ParkingFloorMap({
   return (
     <div className="w-full max-w-[1600px] mx-auto">
       <div className="relative rounded-md overflow-hidden">
-        <img src={image} alt={`Floor ${floor} layout`} className="block w-full h-auto select-none" draggable={false} />
+        <img
+          src={image}
+          alt={`Floor ${floor} layout`}
+          className="block w-full h-auto select-none"
+          style={{ aspectRatio: `${IMAGE_W} / ${IMAGE_H}` }}
+          draggable={false}
+        />
         <div className="absolute inset-0">
           {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i], i + 1))}
           {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i], MAIN_BOXES.length + i + 1))}
