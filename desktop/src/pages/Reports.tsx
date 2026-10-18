@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import {
   BarChart3, TrendingUp, Clock, AlertTriangle,
-  Download, Calendar, LogOut, Bell, FileText
+  Download, Calendar, LogOut, Volume2, VolumeX, FileText
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 
@@ -289,8 +289,9 @@ export default function Reports() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -403,25 +404,29 @@ export default function Reports() {
               {/* Verification Results moved up to fill the grid */}
               <div className="card">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Verification Results</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={verificationPieData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {verificationPieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+                {verificationPieData.every((d) => d.value === 0) ? (
+                  <p className="text-sm text-gray-500 py-8 text-center">No verification events in this date range</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={verificationPieData}
+                        cx="50%"
+                        cy="50%"
+                        labelLine={false}
+                        label={({ name, percent }: any) => `${name} ${(percent * 100).toFixed(0)}%`}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {verificationPieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </div>
 
@@ -465,10 +470,12 @@ export default function Reports() {
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <p className="text-sm text-gray-600">Verification Success Rate</p>
                   <p className="text-2xl font-bold text-green-600">
-                    {verificationPieData.length > 0
-                      ? ((reportData.verificationResults.match / 
-                          (reportData.verificationResults.match + 
-                           reportData.verificationResults.mismatch + 
+                    {(reportData.verificationResults.match +
+                      reportData.verificationResults.mismatch +
+                      reportData.verificationResults.failed) > 0
+                      ? ((reportData.verificationResults.match /
+                          (reportData.verificationResults.match +
+                           reportData.verificationResults.mismatch +
                            reportData.verificationResults.failed)) * 100).toFixed(1)
                       : 0}%
                   </p>

@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Profile } from '@parkwise/shared';
 import {
-  Users, AlertTriangle, CheckCircle, LogOut, Bell,
+  Users, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RefreshCw, Search, Filter, Eye, Edit, Lock,
   Shield, Trash2, X, ChevronLeft, ChevronRight
 } from 'lucide-react';
@@ -211,11 +211,16 @@ export default function UserManagement() {
     setError('');
     
     try {
-      // Reset password via Supabase Auth
-      // Note: This requires admin API key in production
-      await supabase.auth.admin.updateUserById(selectedProfile.id, {
-        password: newPassword,
+      // Resetting someone else's password needs the service-role key, which
+      // must never live in the browser - the admin-user-actions Edge
+      // Function holds it server-side and does this on our behalf after
+      // re-checking we're actually an admin.
+      const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'reset_password', targetUserId: selectedProfile.id, newPassword },
       });
+
+      if (fnError) throw fnError;
+      if (fnData?.error) throw new Error(fnData.error);
 
       // Log to audit_log
       const { data: { user } } = await supabase.auth.getUser();
@@ -371,8 +376,17 @@ export default function UserManagement() {
           },
         });
       } else {
-        // Hard delete
-        await supabase.auth.admin.deleteUser(selectedProfile.id);
+        // Hard delete: same reasoning as reset-password above - the
+        // auth.users deletion needs the service-role key, so it goes
+        // through the Edge Function. The profiles row deletion doesn't
+        // need elevated privileges (admins already have an RLS DELETE
+        // policy for it), so that part stays a direct client call.
+        const { data: fnData, error: fnError } = await supabase.functions.invoke('admin-user-actions', {
+          body: { action: 'hard_delete', targetUserId: selectedProfile.id },
+        });
+        if (fnError) throw fnError;
+        if (fnData?.error) throw new Error(fnData.error);
+
         await supabase.from('profiles').delete().eq('id', selectedProfile.id);
 
         // Log as hard delete
@@ -440,8 +454,9 @@ export default function UserManagement() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -874,6 +889,11 @@ export default function UserManagement() {
                 {actionLoading ? 'Resetting...' : 'Reset Password'}
               </button>
             </div>
+            {!newPassword && (
+              <p className="text-xs text-amber-600 mt-2">
+                Enter a new password above first.
+              </p>
+            )}
           </div>
         </div>
       )}
@@ -950,6 +970,11 @@ export default function UserManagement() {
                 {actionLoading ? 'Processing...' : 'Confirm'}
               </button>
             </div>
+            {!penaltyReason && (
+              <p className="text-xs text-amber-600 mt-2">
+                Enter a reason above first.
+              </p>
+            )}
           </div>
         </div>
       )}

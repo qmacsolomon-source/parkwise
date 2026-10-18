@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle } from '@parkwise/shared';
+import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle, groupSlotsByFloor } from '@parkwise/shared';
 import {
   Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw,
-  Clock, Search, Flag, Edit3, LogOut, Bell
+  Clock, Search, Flag, Edit3, LogOut, Volume2, VolumeX
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
 
 export default function PlateVerification() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [reservations, setReservations] = useState<Reservation[]>([]);
@@ -30,7 +32,11 @@ export default function PlateVerification() {
   const [flagReason, setFlagReason] = useState('');
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  
+  // Accept/Override/Flag only ever surfaced feedback on failure - a
+  // successful action closed its modal and just... didn't say anything,
+  // leaving the attendant to guess whether it actually worked.
+  const [successMessage, setSuccessMessage] = useState('');
+
   const [gracePeriodRemaining, setGracePeriodRemaining] = useState<number>(0);
 
   // Load initial data
@@ -159,10 +165,12 @@ export default function PlateVerification() {
 
       // Update local state
       setSelectedReservation(null);
+      setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error accepting vehicle:', error);
-      alert('Failed to accept vehicle');
+      await dialog.alert('Failed to accept vehicle');
     } finally {
       setActionLoading(false);
     }
@@ -175,10 +183,12 @@ export default function PlateVerification() {
     try {
       // Trigger camera capture via agent service
       await fetch(`${AGENT_SERVICE_URL}/beam/${selectedSlot.id}`, { method: 'POST' });
+      setSuccessMessage('Capture retry triggered.');
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error retrying capture:', error);
-      alert('Failed to retry capture');
+      await dialog.alert('Failed to retry capture');
     } finally {
       setActionLoading(false);
     }
@@ -186,7 +196,7 @@ export default function PlateVerification() {
 
   const handleManualOverride = async () => {
     if (!overrideReason.trim()) {
-      alert('Please provide a reason for manual override');
+      await dialog.alert('Please provide a reason for manual override');
       return;
     }
 
@@ -206,10 +216,12 @@ export default function PlateVerification() {
 
       setShowManualOverride(false);
       setOverrideReason('');
+      setSuccessMessage(`Manual override recorded for slot ${selectedSlot?.slot_code}.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error with manual override:', error);
-      alert('Failed to record manual override');
+      await dialog.alert('Failed to record manual override');
     } finally {
       setActionLoading(false);
     }
@@ -217,7 +229,7 @@ export default function PlateVerification() {
 
   const handleFlagUnverified = async () => {
     if (!flagReason.trim()) {
-      alert('Please provide a reason for flagging');
+      await dialog.alert('Please provide a reason for flagging');
       return;
     }
 
@@ -242,10 +254,12 @@ export default function PlateVerification() {
 
       setShowFlagModal(false);
       setFlagReason('');
+      setSuccessMessage(`Slot ${selectedSlot?.slot_code} flagged as unverified.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
       console.error('Error flagging unverified:', error);
-      alert('Failed to flag as unverified');
+      await dialog.alert('Failed to flag as unverified');
     } finally {
       setActionLoading(false);
     }
@@ -306,9 +320,10 @@ export default function PlateVerification() {
           <div className="flex items-center gap-4">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -325,6 +340,12 @@ export default function PlateVerification() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 py-6">
+        {successMessage && (
+          <div className="p-3 bg-green-50 text-green-800 rounded-lg mb-4 flex items-center gap-2">
+            <CheckCircle size={18} />
+            {successMessage}
+          </div>
+        )}
         {/* Slot Selection */}
         <div className="card mb-6">
           <label className="block text-sm font-medium text-gray-700 mb-2">Select Slot</label>
@@ -338,10 +359,14 @@ export default function PlateVerification() {
             className="input"
           >
             <option value="">-- Select a slot --</option>
-            {slots.map(slot => (
-              <option key={slot.id} value={slot.id}>
-                {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
-              </option>
+            {groupSlotsByFloor(slots).map(group => (
+              <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                {group.slots.map(slot => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
@@ -472,6 +497,11 @@ export default function PlateVerification() {
                     <CheckCircle size={18} />
                     Accept Vehicle
                   </button>
+                  {!selectedReservation && (
+                    <p className="text-xs text-amber-600 -mt-2">
+                      Select a reservation above first.
+                    </p>
+                  )}
 
                   <button
                     onClick={handleRetryCapture}

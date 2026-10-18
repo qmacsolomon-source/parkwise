@@ -73,13 +73,40 @@ CREATE TABLE IF NOT EXISTS vehicles (
 );
 
 -- Slots table
+-- floor/zone/zone_row/zone_col describe WHERE a slot sits on the visual
+-- parking map (LiveOccupancyDashboard/SlotAssignment), not just that it
+-- exists. zone is one of 'compact' (the small row near the entrance),
+-- 'block_a' / 'block_b' (the two big double-loaded-aisle blocks, each 10
+-- columns wide with a divider after column 5, in a 'top' and a 'bottom'
+-- row facing the center aisle), or 'side' (the single column along the
+-- far wall). zone_row is only meaningful for block_a/block_b. zone_col is
+-- the 1-based position within that zone (and within zone_row, for the
+-- blocks) -- it's what the frontend layout template uses to place each
+-- slot, not a guarantee of real-world physical measurement.
 CREATE TABLE IF NOT EXISTS slots (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   slot_code TEXT NOT NULL UNIQUE,
   is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
   status slot_status NOT NULL DEFAULT 'available',
-  current_reservation_id UUID
+  current_reservation_id UUID,
+  floor SMALLINT NOT NULL DEFAULT 1,
+  zone TEXT NOT NULL DEFAULT 'block_a' CHECK (zone IN ('compact', 'block_a', 'block_b', 'side')),
+  zone_row TEXT CHECK (zone_row IN ('top', 'bottom')),
+  zone_col SMALLINT NOT NULL DEFAULT 1
 );
+
+-- Upgrade path for a database created before floor/zone/zone_row/zone_col
+-- existed.
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS floor SMALLINT NOT NULL DEFAULT 1;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS zone TEXT NOT NULL DEFAULT 'block_a';
+DO $$ BEGIN
+  ALTER TABLE slots ADD CONSTRAINT slots_zone_check CHECK (zone IN ('compact', 'block_a', 'block_b', 'side'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS zone_row TEXT;
+DO $$ BEGIN
+  ALTER TABLE slots ADD CONSTRAINT slots_zone_row_check CHECK (zone_row IN ('top', 'bottom'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+ALTER TABLE slots ADD COLUMN IF NOT EXISTS zone_col SMALLINT NOT NULL DEFAULT 1;
 
 -- Reservations table
 CREATE TABLE IF NOT EXISTS reservations (

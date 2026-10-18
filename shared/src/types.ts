@@ -7,6 +7,8 @@ export type VerificationResult = 'match' | 'mismatch' | 'low_confidence' | 'fail
 export type PenaltyType = 'late_cancel' | 'no_show' | 'overstay';
 export type PaymentStatus = 'unpaid' | 'paid';
 export type NotificationType = 'reservation' | 'verification' | 'payment' | 'penalty' | 'system';
+export type SlotZone = 'compact' | 'block_a' | 'block_b' | 'side';
+export type SlotZoneRow = 'top' | 'bottom';
 
 export interface Profile {
   id: string;
@@ -34,6 +36,13 @@ export interface Slot {
   is_pwd: boolean;
   status: SlotStatus;
   current_reservation_id: string | null;
+  // Where this slot sits on the visual parking map, not a precise
+  // real-world measurement -- see database/schema.sql for the full
+  // explanation of what each zone/row looks like.
+  floor: number;
+  zone: SlotZone;
+  zone_row: SlotZoneRow | null;
+  zone_col: number;
 }
 
 export interface Reservation {

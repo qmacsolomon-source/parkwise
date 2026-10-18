@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/shared';
-import { 
-  LayoutDashboard, LogOut, RefreshCw, Search, 
-  AlertTriangle, Car, Clock, User, X, Bell, 
-  CheckCircle, XCircle, AlertCircle, ParkingCircle,
-  Accessibility, ChevronRight, Camera, FileText
+import {
+  LayoutDashboard, LogOut, RefreshCw, Search,
+  AlertTriangle, Car, Clock, User, X, Volume2, VolumeX,
+  CheckCircle, ParkingCircle,
+  Accessibility, ChevronRight, Camera, FileText,
 } from 'lucide-react';
+import ParkingFloorMap from '../components/ParkingFloorMap';
+import FloorSwitcher from '../components/FloorSwitcher';
 
 interface SummaryStats {
   total: number;
@@ -32,6 +36,14 @@ export default function LiveOccupancyDashboard() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
+  const [floor, setFloor] = useState(1);
+  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
+
+  const handleFloorChange = (newFloor: number) => {
+    setFloorDirection(newFloor > floor ? 'up' : 'down');
+    setFloor(newFloor);
+  };
+
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   // Calculate summary stats
@@ -52,12 +64,11 @@ export default function LiveOccupancyDashboard() {
         if (searchQuery) {
           const query = searchQuery.toLowerCase();
           const matchesCode = slot.slot_code.toLowerCase().includes(query);
-          const matchesPlate = Object.values(vehicles).some(v =>
-            v.plate_number.toLowerCase().includes(query)
-          );
-          const matchesCustomer = Object.values(customers).some(c =>
-            c.full_name.toLowerCase().includes(query)
-          );
+          const slotReservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : undefined;
+          const slotVehicle = slotReservation ? vehicles[slotReservation.vehicle_id] : undefined;
+          const slotCustomer = slotVehicle ? customers[slotVehicle.owner_id] : undefined;
+          const matchesPlate = slotVehicle ? slotVehicle.plate_number.toLowerCase().includes(query) : false;
+          const matchesCustomer = slotCustomer ? slotCustomer.full_name.toLowerCase().includes(query) : false;
           if (!matchesCode && !matchesPlate && !matchesCustomer) return false;
         }
 
@@ -86,7 +97,24 @@ export default function LiveOccupancyDashboard() {
 
         return a.slot_code.localeCompare(b.slot_code);
       });
-  }, [slots, searchQuery, filterStatus, filterPwdOnly, vehicles, customers]);
+  }, [slots, searchQuery, filterStatus, filterPwdOnly, vehicles, customers, reservations]);
+
+  const totalFloors = React.useMemo(
+    () => slots.reduce((max, s) => Math.max(max, s.floor), 1),
+    [slots]
+  );
+
+  // If a search only matches something on a different floor than the one
+  // showing, jump there automatically instead of leaving the attendant
+  // looking at an empty map wondering where their result went.
+  useEffect(() => {
+    if (!searchQuery) return;
+    const hasMatchOnCurrentFloor = filteredSlots.some(s => s.floor === floor);
+    if (hasMatchOnCurrentFloor) return;
+    const firstMatch = filteredSlots[0];
+    if (firstMatch) handleFloorChange(firstMatch.floor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, filteredSlots]);
 
   // Load data
   useEffect(() => {
@@ -219,53 +247,6 @@ export default function LiveOccupancyDashboard() {
     setShowDrawer(true);
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'available': return <ParkingCircle className="text-green-600" size={20} />;
-      case 'occupied': return <CheckCircle className="text-blue-600" size={20} />;
-      case 'reserved': return <Clock className="text-amber-600" size={20} />;
-      case 'overstay': return <AlertTriangle className="text-red-600" size={20} />;
-      case 'unverified': return <XCircle className="text-red-600" size={20} />;
-      default: return <AlertCircle className="text-gray-600" size={20} />;
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'available': return 'bg-green-100 text-green-800 border-green-200';
-      case 'occupied': return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'reserved': return 'bg-amber-100 text-amber-800 border-amber-200';
-      case 'overstay': return 'bg-red-100 text-red-800 border-red-200';
-      case 'unverified': return 'bg-red-100 text-red-800 border-red-200';
-      default: return 'bg-gray-100 text-gray-800 border-gray-200';
-    }
-  };
-
-  const getSlotBorder = (slot: Slot) => {
-    if (slot.status === 'overstay' || slot.status === 'unverified') {
-      return 'border-2 border-red-500 animate-pulse';
-    }
-    return 'border border-gray-200';
-  };
-
-  const getTimeRemaining = (slot: Slot) => {
-    if (!slot.current_reservation_id) return null;
-    const reservation = reservations[slot.current_reservation_id];
-    if (!reservation) return null;
-    
-    const endTime = new Date(reservation.end_time);
-    const now = new Date();
-    const diff = endTime.getTime() - now.getTime();
-    
-    if (diff <= 0) return 'Expired';
-    
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes}m`;
-  };
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -293,9 +274,9 @@ export default function LiveOccupancyDashboard() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
-              title={soundEnabled ? 'Sound On' : 'Sound Off'}
+              title={soundEnabled ? 'Sound alerts on' : 'Sound alerts off'}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -364,65 +345,26 @@ export default function LiveOccupancyDashboard() {
           </div>
         </div>
 
-        {/* Slot Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-          {filteredSlots.map(slot => {
-            const agentState = agentStates[slot.id];
-            const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
-            const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
-            const customer = vehicle ? customers[vehicle.owner_id] : null;
-            const timeRemaining = getTimeRemaining(slot);
+        {/* Floor switcher */}
+        <div className="flex items-center justify-between gap-3 mb-6">
+          <h2 className="text-lg font-semibold text-gray-900">Parking Map</h2>
+          <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
+        </div>
 
-            return (
-              <div
-                key={slot.id}
-                onClick={() => handleSlotClick(slot)}
-                className={`card cursor-pointer hover:shadow-lg transition-shadow ${getSlotBorder(slot)}`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg font-bold text-primary">{slot.slot_code}</span>
-                    {slot.is_pwd && (
-                      <Accessibility className="text-info" size={16} />
-                    )}
-                  </div>
-                  {getStatusIcon(slot.status)}
-                </div>
-
-                <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium mb-3 ${getStatusColor(slot.status)}`}>
-                  {slot.status}
-                </div>
-
-                {vehicle && (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex items-center gap-1 text-gray-700">
-                      <Car size={14} />
-                      <span className="font-medium">{vehicle.plate_number}</span>
-                    </div>
-                    {customer && (
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <User size={14} />
-                        <span>{customer.full_name}</span>
-                      </div>
-                    )}
-                    {timeRemaining && (
-                      <div className="flex items-center gap-1 text-gray-600">
-                        <Clock size={14} />
-                        <span>{timeRemaining}</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {agentState && agentState.state === 'verifying' && (
-                  <div className="mt-3 text-xs text-amber-600 flex items-center gap-1">
-                    <RefreshCw size={12} className="animate-spin" />
-                    Verifying...
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+          <ParkingFloorMap
+            slots={filteredSlots}
+            floor={floor}
+            onSlotClick={handleSlotClick}
+            selectedSlotId={selectedSlot?.id}
+            getSlotTitle={(slot) => {
+              const reservation = slot.current_reservation_id ? reservations[slot.current_reservation_id] : null;
+              const vehicle = reservation ? vehicles[reservation.vehicle_id] : null;
+              const customer = vehicle ? customers[vehicle.owner_id] : null;
+              if (!vehicle) return `${slot.slot_code} - ${slot.status}`;
+              return `${slot.slot_code} - ${vehicle.plate_number}${customer ? ` - ${customer.full_name}` : ''}`;
+            }}
+          />
         </div>
 
         {filteredSlots.length === 0 && (
@@ -531,10 +473,12 @@ function SlotDrawer({
   const [showResolveModal, setShowResolveModal] = useState(false);
   const [resolveNote, setResolveNote] = useState('');
   const [loading, setLoading] = useState(false);
+  const dialog = useDialog();
+  const navigate = useNavigate();
 
   const handleResolveAlert = async () => {
     if (!resolveNote.trim()) {
-      alert('Please enter a note');
+      await dialog.alert('Please enter a note');
       return;
     }
 
@@ -561,7 +505,7 @@ function SlotDrawer({
       onClose();
     } catch (error) {
       console.error('Failed to resolve alert:', error);
-      alert('Failed to resolve alert');
+      await dialog.alert('Failed to resolve alert');
     } finally {
       setLoading(false);
     }
@@ -714,14 +658,24 @@ function SlotDrawer({
                 Resolve Alert
               </button>
             )}
-            <button className="btn-secondary w-full flex items-center justify-center gap-2">
-              <ChevronRight size={18} />
-              Reassign Slot
-            </button>
-            <button className="btn-secondary w-full flex items-center justify-center gap-2">
-              <LogOut size={18} />
-              Release Vehicle (Cash Payment)
-            </button>
+            {slot.status === 'reserved' && reservation && (
+              <button
+                onClick={() => navigate('/slot-assignment', { state: { reservationId: reservation.id } })}
+                className="btn-secondary w-full flex items-center justify-center gap-2"
+              >
+                <ChevronRight size={18} />
+                Reassign Slot
+              </button>
+            )}
+            {(slot.status === 'occupied' || slot.status === 'overstay' || slot.status === 'unverified') && reservation && (
+              <button
+                onClick={() => navigate('/payment', { state: { reservationId: reservation.id } })}
+                className="btn-secondary w-full flex items-center justify-center gap-2"
+              >
+                <LogOut size={18} />
+                Release Vehicle (Cash Payment)
+              </button>
+            )}
           </div>
         </div>
 

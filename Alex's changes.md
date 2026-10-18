@@ -1,6 +1,6 @@
 # Alex's Changes
 
-Notes on everything changed in this pass, so the team knows what moved and why. Nothing here touches the mobile app or agent-service.
+Notes on everything changed in this pass, so the team knows what moved and why. Nothing here touches the mobile app (left alone throughout, including this round, since that's actively being worked on separately).
 
 ## ⚠️ Action required on the live Supabase project
 
@@ -54,9 +54,9 @@ It started with `DROP TABLE ... CASCADE` on every table. Re-running it after any
 
 `desktop/src/pages/Dashboard.tsx` was never routed anywhere (`LiveOccupancyDashboard.tsx` replaced it), but was still imported in `App.tsx`. Deleted it along with its two only-used-there helper components, `SlotCard.tsx` and `ReservationCard.tsx`.
 
-## Known limitation — not fixed, needs a backend
+## ~~Known limitation — not fixed, needs a backend~~ — fixed in Round 5
 
-In **User Management**, "Reset Password" and "Hard Delete" both call `supabase.auth.admin.*`, which requires a service-role key. Called from the browser with only the anon key, these will always fail. There's no safe way to fix this from the client — it needs a small backend component (e.g. a Supabase Edge Function) that holds the service-role key server-side. Worth knowing before demoing either button.
+~~In **User Management**, "Reset Password" and "Hard Delete" both call `supabase.auth.admin.*`, which requires a service-role key. Called from the browser with only the anon key, these will always fail.~~ Fixed properly via a Supabase Edge Function — see Round 5 below.
 
 ## Round 2: Manual Entry was still failing even with the RLS fix applied
 
@@ -141,3 +141,213 @@ Five failed attempts locked out every account on that machine for 15 minutes, no
 ### Bonus: ProtectedRoute let profile-less users into the desktop console
 
 Found while reviewing the rest: a logged-in user with no `profiles` row at all (e.g. the exact scenario bug #2 above used to cause) wasn't blocked by the route guard, which only explicitly excluded `role === 'customer'`. Changed it to an allowlist (`attendant`/`admin` only, everyone else — including no profile — denied). Verified live: created a disposable, profile-less test account and confirmed it now gets "Access Denied" instead of full attendant access. That test account (`paranoid-test-1792200188@mailinator.com`) is still sitting in Supabase Auth with no profile and no way to delete it without a service-role key — harmless, but worth removing from the dashboard's Authentication tab eventually.
+
+## Round 4: full click-through audit of every page, plus a critical Manual Entry regression
+
+Asked for directly: "check all buttons, make sure they're doing their intended use." Ran one agent per page against the actual running app (already logged in), clicking every control for real rather than just reading code. Found real, previously-undetected bugs on 6 of the 10 pages. Also hit, diagnosed, and fixed a serious regression that briefly broke Manual Entry again after Round 3 shipped.
+
+### ⚠️ Action required on the live Supabase project
+
+Two more targeted SQL fixes this round (small, standalone — no need to re-run the full files). Both are included in the next full `database/business_rules.sql` / `database/rls_policies.sql` paste, but if you're applying them as standalone patches instead, run these two:
+
+```sql
+-- in rls_policies.sql: audit_log's INSERT policy was briefly too strict
+DROP POLICY IF EXISTS "System can insert audit entries" ON audit_log;
+CREATE POLICY "System can insert audit entries" ON audit_log
+  FOR INSERT WITH CHECK (actor_id = auth.uid() OR is_staff());
+```
+
+```sql
+-- in business_rules.sql: create_notification() and log_audit() both need
+-- SECURITY DEFINER -- see "The real Manual Entry regression" below for why.
+CREATE OR REPLACE FUNCTION create_notification(
+  user_uuid UUID,
+  notif_title TEXT,
+  notif_body TEXT,
+  notif_type notification_type,
+  related_reservation UUID DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  notification_id UUID;
+BEGIN
+  INSERT INTO notifications (user_id, title, body, type, related_reservation_id)
+  VALUES (user_uuid, notif_title, notif_body, notif_type, related_reservation)
+  RETURNING id INTO notification_id;
+  RETURN notification_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION log_audit(
+  actor_uuid UUID,
+  action_text TEXT,
+  audit_details JSONB DEFAULT NULL
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  audit_id UUID;
+BEGIN
+  INSERT INTO audit_log (actor_id, action, details)
+  VALUES (actor_uuid, action_text, audit_details)
+  RETURNING id INTO audit_id;
+  RETURN audit_id;
+END;
+$$;
+```
+
+(Both snippets above were already run live and verified working during this session — re-running `business_rules.sql`/`rls_policies.sql` in full is only needed for a fresh environment; this project's live database already has all of it.)
+
+### The duplicate "Bell" icon, explained and fixed
+
+Every page showed what looked like two notification bells. They were two unrelated things sharing the same icon: `Layout.tsx`'s top-bar bell was a real "Notifications" button with **no `onClick` handler at all** (completely dead), while every individual page *also* had its own bell that was actually a sound-on/off toggle, just drawn with the wrong icon.
+
+- **`Layout.tsx`**: wired up a real, working notification dropdown — fetches the logged-in user's own `notifications` rows, shows an unread-count badge, marks read on click, clean empty/loading states. Verified live with real inserted/read data. Known limitation: every notification-creating trigger in the database only ever targets `customer_id` (never staff), so an attendant/admin account will normally see "No notifications yet" until the system also generates staff-facing notifications — that's a pre-existing gap, not something this fix invented or tried to paper over.
+- **Every page** (`LiveOccupancyDashboard`, `PlateVerification`, `CashPayment`, `TimeAndPaymentLog`, `ManualEntry`, `Reports`, `AccountCreation`, `SlotAssignment`, `UserManagement`, `RatesAndPricing`): swapped the mislabeled sound-toggle icon from `Bell` to `Volume2`/`VolumeX`, with a hover tooltip ("Sound alerts on/off"). Purely cosmetic, but it's exactly what was confusing — the two bells are now visually distinct.
+
+### Bugs found and fixed, page by page
+
+- **Live Occupancy**: the search box matched plates/customers **globally** instead of per-slot — searching any real plate or customer name highlighted every slot in the system, not just the right one. Fixed to look up each slot's own reservation chain. Also found (not fixed — needs real feature work, not a quick patch): **"Reassign Slot" and "Release Vehicle" on the slot detail drawer have no click handler at all.** They're decorative buttons that do nothing.
+- **Cash Payment**: confirming a payment auto-triggered `window.print()`, which opens a blocking native OS dialog with no way to dismiss it programmatically — froze the page for real users too, not just automation. Now the automatic post-payment action only downloads the receipt; printing is an explicit separate action. Also fixed "Print Receipt Again" being permanently dead code (the state it depended on was always cleared right before the button could render) and a related bug where the receipt would print "Amount Received: $NaN" after that state got cleared.
+- **Reports**: the Verification Results pie chart rendered completely blank with no message when there's no data (rather than a clean empty state like the other charts), and "Verification Success Rate" showed "NaN%" in that same case. Both fixed.
+- **Slot Assignment**: a slot in Maintenance was still hardcoded gray on the slot map, inconsistent with this session's earlier StatusBadge color fix — now orange, matching. Also fixed: the "Manage Slots" header button did nothing (it opened the modal but never set which slot to edit, so the modal's render condition was never satisfied).
+- **User Management**: "Reset Password" silently showed a false **"Operation successful!"** banner even when the underlying call failed (expected, since there's no service-role key) — it just never checked the error. Now shows the real failure instead of lying to the admin. "Last Login" and "Delete User" (both fixed in Round 3) were re-verified working.
+- **Manual Entry**: the Void Entry flow was wiping the original entry's plate/customer/slot/time data from its own audit log record every time it voided something, because of a stale `(entry as any).details` reference that never actually matched the real data shape. Fixed.
+- **Account Creation, Plate Verification, Time & Payment Log, Rates & Pricing**: no bugs found beyond the icon swap — each confirmed working as intended, including specific regression checks (Account Creation's admin-session-restore, Time & Payment Log's annotation save-and-persist, Rates & Pricing's grace-period/CEIL math from Round 3).
+
+### The real Manual Entry regression (found and fixed live, not by code review)
+
+Partway through this round, three independent agents hit the exact same wall: creating any new reservation failed with a 403, even though it had been confirmed fully working right after Round 3. Root-caused by direct testing against the live database (not guesswork):
+
+1. **First layer**: Round 3's `audit_log` INSERT policy fix (`WITH CHECK (actor_id = auth.uid())`, meant to stop customers forging audit entries) was *too* strict — it also blocked the database's own `audit_reservation_changes()` trigger, which legitimately logs `actor_id = NEW.customer_id` (the walk-in customer) when an attendant creates their reservation. Loosened to `actor_id = auth.uid() OR is_staff()`.
+2. **Second, deeper layer, found right after**: even with that fixed, reservations *still* failed — this time while inserting the "your reservation was created" notification. Postgres enforces the table's SELECT policy on an INSERT's `RETURNING` clause too, not just the INSERT policy itself, and `create_notification()`/`log_audit()` (both called from triggers, both doing `INSERT ... RETURNING id INTO ...`) were plain functions, not `SECURITY DEFINER` — so when an attendant creates something *for* a customer, the RETURNING clause gets blocked by "you can only view your own notifications/audit entries," and the whole transaction rolls back. This is a genuinely pre-existing bug (not introduced this session), just never triggered before because every prior end-to-end test happened to be run as an admin account whose broader view permissions masked it on the audit_log side — the notifications side has no such admin-wide policy at all, so it surfaced immediately. Fixed by marking both functions `SECURITY DEFINER` (same pattern already used for `is_admin()`/`is_attendant()`/`is_staff()` in this codebase).
+
+Verified with a real submission through the actual Manual Entry form ("Manual entry created successfully"), not just an API test. All test data (reservations, slot states) was cleaned up afterward.
+
+### Known issues, not fixed this round (flagged for later)
+
+- ~~Live Occupancy's "Reassign Slot" and "Release Vehicle" buttons do nothing~~ — fixed in Round 5.
+- ~~Several pages use native `alert()`/`confirm()` dialogs~~ — fixed in Round 5.
+- **Account Creation hit Supabase's built-in email rate limit** during this round's testing (too many test signups in one session) — not a bug, just infrastructure; be aware if testing signup again soon.
+
+## Round 5: native popups, the two dead Live Occupancy buttons, and a real fix for Reset Password / Hard Delete
+
+Picked up the three items flagged at the end of Round 4.
+
+### ⚠️ Action required — but only once, and not through the SQL editor this time
+
+This round added a **Supabase Edge Function**, which can't be pasted into the SQL editor like everything else so far. If you're setting this project up somewhere new, deploy it with the Supabase CLI from the repo root:
+
+```
+npx supabase init      # press Enter through any prompts
+npx supabase login     # opens your browser to authorize
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy admin-user-actions
+```
+
+No key to copy anywhere — Supabase gives every Edge Function access to the project's service-role key automatically, server-side only. Already deployed and verified working on the live project as of this round.
+
+### Native browser popups replaced everywhere
+
+Every `window.alert()` and `window.confirm()` in the app (11 call sites across `LiveOccupancyDashboard.tsx`, `ManualEntry.tsx`, `PlateVerification.tsx`, `TimeAndPaymentLog.tsx`) replaced with a proper in-app dialog that matches the rest of the UI (same style as the Logout confirmation). New shared piece: `desktop/src/contexts/DialogContext.tsx` — a `DialogProvider` (wrapped around the whole app in `App.tsx`) exposing a `useDialog()` hook with promise-based `alert(message)` / `confirm(message)`, so call sites read almost identically to the native versions (`await dialog.confirm('...')` instead of `confirm('...')`) but render as a styled modal instead of a jarring plain browser box. Also fixes the native-dialog-freezing-automated-testing problem noted in earlier rounds.
+
+### Live Occupancy's "Reassign Slot" and "Release Vehicle" — now gated correctly and actually do something
+
+These two buttons used to render unconditionally and do nothing at all. Two problems, both fixed:
+
+1. **They didn't make sense for every slot status.** Reassigning only makes sense before the car has actually arrived (`slot.status === 'reserved'`) — reassigning an occupied slot would mean moving a parked car, which isn't what this button is for. Releasing a vehicle only makes sense once a car is actually there (`occupied`/`overstay`/`unverified`). Both buttons are now hidden outside their correct status, instead of always showing regardless of whether the action makes sense.
+2. **They didn't do anything.** Rather than duplicate Slot Assignment's reassignment logic and Cash Payment's payment logic inside this drawer too, both buttons now navigate to the page that already does that job correctly (tested and fixed earlier this session) — **and carry the specific reservation along with them**, so the destination page opens straight into the right flow (Slot Assignment's reassign modal already open on the right reservation; Cash Payment with that reservation already selected and the charge calculated) instead of making the attendant re-find it from scratch.
+
+### Reset Password / Hard Delete — properly fixed, not just failing honestly anymore
+
+The real fix flagged as a limitation since Round 1: a new Supabase Edge Function, `supabase/functions/admin-user-actions/index.ts`, does the privileged work instead of the browser trying to. It checks the caller's own session is actually an admin (via the same `profiles` table/RLS the rest of the app trusts), and only then uses the service-role key — which lives purely as a Supabase-managed secret on the function's server, deployed via the Supabase CLI, never pasted into any file or seen by the browser — to actually reset the password or delete the auth user. `UserManagement.tsx` now calls this function (`supabase.functions.invoke('admin-user-actions', ...)`) instead of `supabase.auth.admin.*` directly.
+
+One bug found and fixed during testing: the function's own auth check initially failed every request with "Not authenticated" — `auth.getUser()` ignores the request's Authorization header for its own calls unless the token is passed to it explicitly (it otherwise only looks at client-side session storage, which doesn't exist in a stateless server function). Fixed by extracting the bearer token and passing it directly: `callerClient.auth.getUser(jwt)`.
+
+Verified live end-to-end: called the deployed function directly with a real admin session and confirmed the full chain works (authenticated → confirmed admin → service-role action actually reaches Supabase's Auth system) — used it to clean up the disposable `paranoid-test-...@mailinator.com` account left over from Round 4's testing, rather than touch any real account.
+
+## Round 6: small UX fixes, then a full end-to-end shift simulation that found two real bugs
+
+### Small fixes requested directly
+
+- **Live Occupancy's time-remaining badge is now actually live.** It only ever recomputed when something else happened to trigger a re-render — between refreshes it just sat there looking frozen, and it only ever showed hours/minutes anyway. Added a 1-second ticking clock and extended the format to include seconds.
+- **Cash Payment now warns before releasing a slot early.** Confirming payment before the reservation's reserved time was actually up used to go through silently with no indication anything was off. Now shows a confirmation naming exactly how many minutes remain before letting the attendant proceed. Early payment is still allowed (a customer leaving ahead of schedule is legitimate), it just can't happen by accident.
+- **Voiding an active Manual Entry now requires a much stronger warning.** Void exists to undo an immediate mistake, not to end an active, occupied session with no payment collected - but both got the same generic "are you sure?" before this. Entries older than 5 minutes (very likely a real parked car, not a typo being corrected) now get an explicit warning naming the consequence, with a red "Void Anyway" button instead of a generic one.
+- **Disabled buttons now explain why, throughout the app.** A button that's just disabled with no explanation looks broken to someone who doesn't know the system internals - e.g. Cash Payment's Confirm button gave zero feedback when clicked with no amount entered. Added a visible hint wherever a button could be silently disabled by missing input: Cash Payment (amount), Plate Verification (no reservation selected), Slot Assignment (no new slot chosen), User Management (Reset Password / Waive Penalty's required fields).
+
+### Full shift simulation (login → Live Occupancy → Manual Entry → Plate Verification → Cash Payment → Time & Payment Log), which found two more real bugs live
+
+- **Manual Entry's "Recent Entries" showed stale status forever.** The status badge was only ever written once (at creation, or by Void) and never updated again - so an entry that had long since been paid off and completed would still show "active" indefinitely, and the Void button was offered on already-completed transactions. Now fetches each entry's real, current reservation status instead of relying on a snapshot from creation time.
+- **Plate Verification never confirmed success on anything.** Accept Vehicle, Manual Override, and Flag Unverified only ever said something when they failed - a successful action just closed its modal in silence. Verified live: ran a real Manual Override, confirmed via direct query it had worked, with nothing in the UI saying so. Added a clear success confirmation to all three.
+- **Time & Payment Log showed $0.00 and a blank Attendant for every single transaction, real or historical.** Found by actually paying a real $50 test reservation and watching the log report it as $0.00. The underlying payment record was completely correct - the bug was that `payments.reservation_id` has no UNIQUE constraint, so PostgREST embeds `reservations -> payments` as an array even though there's only ever one payment per reservation in practice. The code cast that array straight to a single object, so every `.base_charge`/`.total`/`.attendant` access was silently `undefined` and fell through to a zero/blank default. This has almost certainly been wrong since this page was first built, not something introduced this session. Fixed by taking the first element of the array; verified every row (new and historical) now shows its real figures.
+
+### Cleanup note
+
+The simulation's disposable walk-in customer ("Shift Simulation") couldn't be fully hard-deleted once it had a completed reservation attached - attempting it surfaced a real constraint (the reservation-delete cascade tries to log an audit entry attributed to the very customer being deleted). This isn't a bug: it's the same reason `UserManagement.tsx`'s own Delete action already soft-deletes (disables) any account with reservation history instead of hard-deleting it. Did the same here - the test profile is disabled and clearly renamed `[TEST - Shift Simulation, disabled]` rather than force-deleted.
+
+## Round 7: a real 3-floor parking map for Live Occupancy and Slot Assignment
+
+Replaced the plain uniform grid of slot cards with an actual visual parking map matching a real garage floor plan you provided: a small "compact" row near the entrance, an elevator/stairs landmark, two big double-loaded-aisle blocks (a top row and a bottom row of 10 spots each, split by a divider), and a single-file column along the far wall - repeated across 3 floors, with a floor switcher (and a brief rise/descend animation when changing floors) above the map. This is genuinely what the system should look like for something billed as "the digital representation of their parking lot."
+
+### ⚠️ Action required on the live Supabase project - two files, in order, once
+
+This is a bigger database change than usual: the slot layout went from 20 slots (A1-A20) to 168 (56 per floor x 3 floors). Run these two files, in this exact order:
+
+1. `database/schema.sql` - adds the new `floor`/`zone`/`zone_row`/`zone_col` columns to `slots` (safe to re-run, as always).
+2. `database/migrate_multi_floor_layout.sql` - **new, one-time file.** This is NOT part of schema.sql/seed.sql on purpose: it `UPDATE`s your 20 existing slots by their old code (A1 -> 1C1, A2 -> 1C2, etc.) to relocate them into floor 1's new layout rather than deleting and recreating them, specifically so every reservation and payment already tied to those slots stays intact - nothing gets wiped. It then adds the rest of floor 1 plus all of floors 2 and 3. Verified live: ran both, confirmed all 168 slots landed with the right floor/zone breakdown (56/floor, 6 PWD total), and confirmed the original A1-A20 history (the real `SIM001` test payment, the historical entries) was still there afterward under its new slot codes.
+
+A brand-new install never needs the migration file - `seed.sql` now seeds the full 168-slot, 3-floor layout directly.
+
+### What's new
+
+- **`ParkingFloorMap.tsx`** (new shared component) - renders one floor's worth of slots in the layout described above, reusing the same status color convention as `StatusBadge.tsx` (just a shade more saturated, since a 36px map cell needs more contrast than a full-width badge to still read at a glance). Clicking a slot does exactly what clicking a card used to: opens the slot detail drawer on Live Occupancy, opens the Manage Slot modal on Slot Assignment.
+- **`FloorSwitcher.tsx`** (new shared component) - floor tabs (built from however many distinct floor numbers actually exist in the data, not hardcoded to 3) plus up/down arrows, used identically on both pages.
+- **The floor-change animation** is a plain CSS keyframe (`index.css`) - the incoming floor's map rises into view when going up, descends when going down. No new dependency needed for it.
+- **Live Occupancy** keeps the old card grid too, as a "List" view next to the new "Map" view (a toggle, defaulting to Map) - searching by plate/customer/slot code now auto-switches floor if the only match is on a different one than currently showing, instead of leaving the map looking empty.
+- **Slot codes changed format**: `A1`-`A20` is now `{floor}{zone letter}{number}`, e.g. `1A7`, `2B14`, `3S3`. The map itself hides the leading floor digit on each cell (floor is already obvious from the page around it) but the full code is still what's stored and what shows everywhere else (dropdowns, logs, receipts).
+
+### A real usability bug found immediately after the migration, and fixed
+
+Manual Entry's, Plate Verification's, and Slot Assignment's plain `<select>` slot dropdowns went from a clean 20-item list to a 168-item one with **no sort order at all** (Postgres returns unordered rows without an explicit `.order()`, and the one that existed, `slot_code` string-sorted, puts "1A10" before "1A2") - scrolling through it to find a specific slot was genuinely painful. Added a shared sort/group utility, `groupSlotsByFloor()` (new, `shared/src/slotLayout.ts`), that orders slots the way someone looking at the actual map would expect - by floor, then by walking through the map itself (compact row, block A top-to-bottom, block B top-to-bottom, side column) - and wired all three dropdowns to use it with `<optgroup>` sections per floor. Verified live: each dropdown now shows three clearly-labeled "Floor 1/2/3" groups, each in correct walking order.
+
+## Round 8: map restyled to match a real garage schematic
+
+Round 7's map worked but looked like a grid of form fields (labeled bordered boxes: "Compact" / "Block A" / "Block B" / "Side"), not an actual parking lot. Rebuilt `ParkingFloorMap.tsx`'s visuals to match a reference top-down schematic directly: a dark frame around the whole floor, the floor number painted in the top-left and bottom-left corners like a real garage level marker, small yellow curb-reflector accents, an elevator/stairs block (teal accent strip) in the top-right corner, a gray asphalt-colored floor, the two main rows run as one continuous strip with a thin aisle line between them and a thicker divider bar only at each end (instead of two separately-boxed "Block A"/"Block B" sections), yellow directional flow arrows (straight + corner arrows) showing the drive path through each row, and the side column rendered as a plain ladder of stalls with no box or label.
+
+Data model, zone grouping, and slot counts are all unchanged from Round 7 - this was purely the paint job. Slot clicking, status colors (available/reserved/occupied/overstay/unverified/maintenance), the PWD ring, and the selection ring all work exactly as before; that part couldn't be dropped since it's how the attendant actually uses the map, even though the reference image itself was a static (non-interactive) mockup. Verified live on both Live Occupancy and Slot Assignment, including floor switching (corner badges update correctly) and the narrower "Slot Map" card layout on Slot Assignment.
+
+### Round 8 follow-up: rebuilt again as a direct 1:1 copy, not a reinterpretation
+
+The first pass above still used labeled, bordered, boxed buttons with visible slot codes - a reasonable-looking map, but not an actual copy of the reference image, which has thin unlabeled tick-mark stalls, no boxes, and a specific pixel layout (exact corner placement, a staircase icon with diagonal hatching, specific arrow positions). Rebuilt `ParkingFloorMap.tsx` a second time on a fixed-size pixel canvas positioned to match the reference directly: compact + block A + block B now render as one continuous tick row (no separate labeled sections), bottom-row stalls align under the matching top-row columns the way a real garage's support columns would, the elevator icon got actual diagonal stair hatching instead of a plain box, and slot codes are no longer shown as permanent text (they still show on hover via the tooltip, and the full code is always visible in the drawer/modal opened by clicking) to match the reference's clean, label-free look.
+
+Found and fixed one bug during this rebuild: the frame's outer wrapper had no explicit width, so it silently stretched to fill the full card instead of hugging the fixed-size canvas, leaving a blank gap to the right of the map inside the border. Fixed by making the frame an `inline-block` that sizes to its content, with a separate scroll wrapper around it for narrow layouts (like the "Slot Map" card on Slot Assignment). Verified live on both pages, including scrolling the narrower Slot Assignment card to see the far-right side column, and clicking a stall to confirm it still opens the correct slot ("Manage Slot 1A13") with a visible selection ring.
+
+## Round 9: the map now uses your actual reference images, not a redraw of them
+
+Round 8's rebuild was still a from-scratch recreation of the reference drawing using CSS shapes - closer than the first pass, but still not literally *your* image. This round switches to the real thing: `desktop/src/assets/floor-maps/floor-1.png` / `floor-2.png` / `floor-3.png` (the three separated, higher-resolution floor images you provided) are now the actual background of `ParkingFloorMap.tsx` - nothing about the frame, floor number, elevator icon, dividers, or arrows is drawn by the app anymore, it's all your artwork, shown as-is. On top of each image sit small, mostly-transparent click targets (a translucent dot per stall, more opaque when a slot isn't `available`) positioned at pixel coordinates measured directly off each image - divider positions, tick-line centers, side-column spacing - so they line up with your actual drawing rather than an approximation of it.
+
+### ⚠️ Action required on the live Supabase project - one file, once
+
+Along the way, counting the stalls actually drawn in the reference images (12 per row x 2 rows + 10 side = **34 per floor**, verified by measuring tick spacing in Python, not eyeballed) turned up a real mismatch: the live database still had 56 slots/floor from Round 7's original layout. Rather than keep the data ahead of what's actually drawn, `database/migrate_shrink_to_reference_layout.sql` (new, one-time) shrinks each floor to the 34 slots that match the image: drops the unused "compact" (6/floor) and "block_b" (20/floor) zones entirely, and extends "block_a" from 10+10 to 12+12 (codes `{floor}A1`-`{floor}A24`, top row columns 11/12 - nearest the elevator in the drawing - marked PWD). The side column is untouched (already matched at 10/floor).
+
+This is a clean delete + recreate, not a history-preserving remap like Round 7's migration - confirmed safe by querying the live project first: **zero reservations and zero payments reference any slot** right now, so nothing's at risk. Run `database/migrate_shrink_to_reference_layout.sql` once in the Supabase SQL Editor; `seed.sql` is also updated so a fresh install seeds the 34/floor layout directly.
+
+Verified live both before and after checking the data: the map correctly shows markers only for slots that actually exist (10+10 main-row dots pre-migration, since Round 7's data only went up to column 10), clicking a dot opens the right slot ("Manage Slot 1A1"), and the dot-to-tick alignment holds up under zoom.
+
+## Round 10: map layout cleanup - bigger, simpler floor switching, better use of screen space
+
+Three direct UI complaints, all fixed:
+
+- **Live Occupancy's Map/List toggle is gone** - the old card-grid "List" view (a separate way of browsing the same slots as plain cards) added a layer of UI without adding function the map doesn't already cover, so it's removed along with the now-dead code it only existed to feed (the live H:M:S countdown ticker, per-card status icon/color helpers - none of that was used anywhere else). Map is now the only view.
+- **The map is much bigger.** `ParkingFloorMap.tsx` no longer renders at a fixed 820px - it now scales to fill whatever width its container gives it (up to 1600px), so on Live Occupancy it fills the full page width instead of sitting in a small box with empty space around it. The same component automatically sizes down correctly inside Slot Assignment's narrower card too, since it's all percentage-based now.
+- **Floor switching is just two small arrows now.** `FloorSwitcher.tsx` dropped the "Floor 1 / Floor 2 / Floor 3" tab buttons entirely - it's now an up/down chevron pair with a compact "Floor N" label between them, taking a fraction of the space the old tab row did.
+- **Slot Assignment's layout reordered**: the Slot Map card now comes first and spans the full page width (it was previously squeezed into the right half of a two-column grid, which is what made it look cramped). "Upcoming & Active Reservations" moved below it, now shown as a multi-column card grid instead of a single-column list, so it doesn't feel like wasted space now that it's not fighting the map for width.
+
+Verified live on both pages: List toggle is gone, the map fills the page width on Live Occupancy, the up/down arrows switch floors correctly (confirmed floor number and background image both update), and Slot Assignment's reordered layout still opens the right slot on click ("Manage Slot 1A1").

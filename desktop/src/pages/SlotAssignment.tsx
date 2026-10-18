@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, Reservation } from '@parkwise/shared';
+import { Slot, Reservation, groupSlotsByFloor } from '@parkwise/shared';
+import ParkingFloorMap from '../components/ParkingFloorMap';
+import FloorSwitcher from '../components/FloorSwitcher';
 import {
-  MapPin, AlertTriangle, CheckCircle, LogOut, Bell,
+  MapPin, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RefreshCw, Settings, Filter, Clock, User, Car
 } from 'lucide-react';
 
@@ -18,6 +21,10 @@ interface ReservationWithDetails extends Reservation {
 
 export default function SlotAssignment() {
   const { profile, logout } = useAuth();
+  const location = useLocation();
+  const pendingReservationId = useRef<string | null>(
+    (location.state as { reservationId?: string } | null)?.reservationId ?? null
+  );
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reservations, setReservations] = useState<ReservationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +39,13 @@ export default function SlotAssignment() {
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
   const [showSlotSettings, setShowSlotSettings] = useState(false);
+  const [floor, setFloor] = useState(1);
+  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
+
+  const handleFloorChange = (newFloor: number) => {
+    setFloorDirection(newFloor > floor ? 'up' : 'down');
+    setFloor(newFloor);
+  };
 
   const isAdmin = profile?.role === 'admin';
 
@@ -98,6 +112,20 @@ export default function SlotAssignment() {
       }));
 
       setReservations(reservationsWithDetails);
+
+      // Came here from Live Occupancy's "Reassign Slot" for a specific
+      // reservation -- open straight into that reassign flow instead of
+      // making the attendant re-find it in this page's list. Only consume
+      // once, so the realtime subscription's later refreshes don't keep
+      // re-opening the modal.
+      if (pendingReservationId.current) {
+        const target = reservationsWithDetails.find(r => r.id === pendingReservationId.current);
+        pendingReservationId.current = null;
+        if (target) {
+          setSelectedReservation(target);
+          setShowReassignModal(true);
+        }
+      }
     } catch (error) {
       console.error('Error loading reservations:', error);
     } finally {
@@ -261,6 +289,7 @@ export default function SlotAssignment() {
 
   const filteredSlots = filterPwd ? slots.filter(s => s.is_pwd) : slots;
   const availableSlots = filteredSlots.filter(s => s.status === 'available');
+  const totalFloors = slots.reduce((max, s) => Math.max(max, s.floor), 1);
 
   return (
     <div className="min-h-screen bg-background">
@@ -278,8 +307,9 @@ export default function SlotAssignment() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -338,78 +368,21 @@ export default function SlotAssignment() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Reservations List */}
-          <div className="card">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming & Active Reservations</h2>
-            {loading ? (
-              <div className="text-center py-8 text-gray-500">Loading...</div>
-            ) : reservations.length === 0 ? (
-              <div className="text-center py-8 text-gray-500">No reservations found</div>
-            ) : (
-              <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {reservations.map((reservation) => (
-                  <div
-                    key={reservation.id}
-                    className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-sm font-semibold text-gray-900">
-                            Slot {reservation.slot_code}
-                          </span>
-                          <span className={`px-2 py-0.5 text-xs rounded-full ${
-                            reservation.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                          }`}>
-                            {reservation.status}
-                          </span>
-                          {reservation.is_pwd && (
-                            <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
-                              PWD
-                            </span>
-                          )}
-                        </div>
-                        <div className="space-y-1 text-sm text-gray-600">
-                          <div className="flex items-center gap-2">
-                            <User size={14} />
-                            <span>{reservation.customer_name}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Car size={14} />
-                            <span>{reservation.vehicle_plate}</span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Clock size={14} />
-                            <span>
-                              {new Date(reservation.start_time).toLocaleString()} - {new Date(reservation.end_time).toLocaleString()}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setSelectedReservation(reservation);
-                          setShowReassignModal(true);
-                        }}
-                        className="ml-4 px-3 py-1 text-sm bg-primary text-white rounded hover:bg-primary-dark"
-                      >
-                        Reassign
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Slot Map */}
-          <div className="card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
+        {/* Slot Map */}
+        <div className="card mb-6">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
+            <div className="flex items-center gap-3">
+              <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
               {isAdmin && (
                 <button
-                  onClick={() => setShowSlotSettings(true)}
+                  onClick={() => {
+                    const onThisFloor = filteredSlots.filter(s => s.floor === floor);
+                    if (onThisFloor.length > 0) {
+                      setEditingSlot(onThisFloor[0]);
+                      setShowSlotSettings(true);
+                    }
+                  }}
                   className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
                 >
                   <Settings size={16} />
@@ -417,37 +390,85 @@ export default function SlotAssignment() {
                 </button>
               )}
             </div>
-            <div className="grid grid-cols-4 gap-3 max-h-[600px] overflow-y-auto">
-              {filteredSlots.map((slot) => (
+          </div>
+          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+            <ParkingFloorMap
+              slots={filteredSlots}
+              floor={floor}
+              selectedSlotId={editingSlot?.id}
+              onSlotClick={(slot) => {
+                if (isAdmin) {
+                  setEditingSlot(slot);
+                  setShowSlotSettings(true);
+                }
+              }}
+              getSlotTitle={(slot) => `${slot.slot_code} - ${slot.status}${slot.is_pwd ? ' (PWD)' : ''}`}
+            />
+          </div>
+        </div>
+
+        {/* Reservations List */}
+        <div className="card">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Upcoming & Active Reservations</h2>
+          {loading ? (
+            <div className="text-center py-8 text-gray-500">Loading...</div>
+          ) : reservations.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">No reservations found</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[600px] overflow-y-auto">
+              {reservations.map((reservation) => (
                 <div
-                  key={slot.id}
-                  className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
-                    slot.status === 'available'
-                      ? 'border-green-300 bg-green-50 hover:bg-green-100'
-                      : slot.status === 'occupied'
-                      ? 'border-red-300 bg-red-50'
-                      : slot.status === 'maintenance'
-                      ? 'border-gray-400 bg-gray-200'
-                      : 'border-gray-300 bg-gray-50'
-                  } ${slot.is_pwd ? 'ring-2 ring-purple-400' : ''}`}
-                  onClick={() => {
-                    if (isAdmin) {
-                      setEditingSlot(slot);
-                      setShowSlotSettings(true);
-                    }
-                  }}
+                  key={reservation.id}
+                  className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
                 >
-                  <div className="text-center">
-                    <div className="font-semibold text-gray-900">{slot.slot_code}</div>
-                    <div className="text-xs text-gray-600 capitalize">{slot.status}</div>
-                    {slot.is_pwd && (
-                      <div className="text-xs text-purple-600 font-medium">PWD</div>
-                    )}
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-sm font-semibold text-gray-900">
+                          Slot {reservation.slot_code}
+                        </span>
+                        <span className={`px-2 py-0.5 text-xs rounded-full ${
+                          reservation.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {reservation.status}
+                        </span>
+                        {reservation.is_pwd && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
+                            PWD
+                          </span>
+                        )}
+                      </div>
+                      <div className="space-y-1 text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <User size={14} />
+                          <span>{reservation.customer_name}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Car size={14} />
+                          <span>{reservation.vehicle_plate}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Clock size={14} />
+                          <span>
+                            {new Date(reservation.start_time).toLocaleString()} - {new Date(reservation.end_time).toLocaleString()}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
+                  <button
+                    onClick={() => {
+                      setSelectedReservation(reservation);
+                      setShowReassignModal(true);
+                    }}
+                    className="mt-3 w-full px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary-dark"
+                  >
+                    Reassign
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -479,10 +500,14 @@ export default function SlotAssignment() {
                   disabled={reassigning}
                 >
                   <option value="">-- Select a slot --</option>
-                  {availableSlots.map((slot) => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
-                    </option>
+                  {groupSlotsByFloor(availableSlots).map(group => (
+                    <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                      {group.slots.map((slot) => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </div>
@@ -508,6 +533,11 @@ export default function SlotAssignment() {
                 {reassigning ? 'Reassigning...' : 'Reassign'}
               </button>
             </div>
+            {!newSlotId && (
+              <p className="text-xs text-amber-600 mt-2">
+                Choose a new slot above before reassigning.
+              </p>
+            )}
           </div>
         </div>
       )}

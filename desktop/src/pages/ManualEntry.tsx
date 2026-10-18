@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
-import { Slot } from '@parkwise/shared';
+import { Slot, ReservationStatus, groupSlotsByFloor } from '@parkwise/shared';
 import {
-  FileText, AlertTriangle, CheckCircle, LogOut, Bell,
+  FileText, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   Trash2, Clock, User, Phone, MapPin
 } from 'lucide-react';
 
@@ -21,7 +22,14 @@ interface ManualEntry {
   hasPwdPermit: boolean;
   attendant: string;
   createdAt: string;
-  status: 'active' | 'voided';
+  // 'voided' is a staff action recorded in audit_log and always wins.
+  // Anything else reflects the reservation's REAL current status (fetched
+  // fresh in loadRecentEntries), not just whatever was true the moment
+  // this entry was created -- otherwise a paid, completed entry would go
+  // on showing "active" forever, which is exactly backwards from what the
+  // attendant needs to see.
+  status: ReservationStatus | 'voided';
+  details: Record<string, any>;
 }
 
 function formatDuration(totalMinutes: number): string {
@@ -32,8 +40,32 @@ function formatDuration(totalMinutes: number): string {
   return `${minutes}m`;
 }
 
+// Void ends a session with no payment collected -- only makes sense while
+// the reservation is still genuinely ongoing. Letting it show on an
+// already-completed, cancelled, or no-show entry would suggest an action
+// that doesn't make sense to take on something already resolved.
+function isVoidableStatus(status: ReservationStatus | 'voided'): boolean {
+  return status === 'active' || status === 'verified' || status === 'overstay';
+}
+
+function getEntryStatusBadgeClass(status: ReservationStatus | 'voided'): string {
+  switch (status) {
+    case 'voided':
+    case 'cancelled':
+    case 'no_show':
+      return 'bg-gray-100 text-gray-600';
+    case 'completed':
+      return 'bg-green-100 text-green-800';
+    case 'overstay':
+      return 'bg-red-100 text-red-800';
+    default:
+      return 'bg-blue-100 text-blue-800';
+  }
+}
+
 export default function ManualEntry() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [slots, setSlots] = useState<Slot[]>([]);
   const [recentEntries, setRecentEntries] = useState<ManualEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,20 +118,46 @@ export default function ManualEntry() {
 
       if (error) throw error;
 
-      const entries: ManualEntry[] = (data || []).map((item: any) => ({
-        id: item.id,
-        plate: item.details.plate,
-        customerName: item.details.customer_name || null,
-        customerPhone: item.details.customer_phone || null,
-        slot: item.details.slot_code,
-        slotId: item.details.slot_id,
-        timeIn: item.details.time_in,
-        durationMinutes: item.details.duration_minutes ?? Math.round((item.details.duration || 0) * 60),
-        hasPwdPermit: item.details.has_pwd_permit,
-        attendant: item.actor_id,
-        createdAt: item.created_at,
-        status: item.details.status || 'active',
-      }));
+      // audit_log.details.status is only ever written at creation time
+      // ('active') or by handleVoidEntry ('voided') -- it has no idea a
+      // reservation was later paid off, cancelled, or went into overstay.
+      // Look up each entry's actual reservation status fresh so the badge
+      // (and the Void button's availability) reflect what's really true
+      // right now, not a snapshot from whenever this entry was created.
+      const reservationIds = (data || [])
+        .map((item: any) => item.details.reservation_id)
+        .filter(Boolean);
+
+      const liveStatusByReservationId: Record<string, ReservationStatus> = {};
+      if (reservationIds.length > 0) {
+        const { data: liveReservations } = await supabase
+          .from('reservations')
+          .select('id, status')
+          .in('id', reservationIds);
+        (liveReservations || []).forEach((r: any) => {
+          liveStatusByReservationId[r.id] = r.status;
+        });
+      }
+
+      const entries: ManualEntry[] = (data || []).map((item: any) => {
+        const wasVoided = item.details.status === 'voided';
+        const liveStatus = liveStatusByReservationId[item.details.reservation_id];
+        return {
+          id: item.id,
+          plate: item.details.plate,
+          customerName: item.details.customer_name || null,
+          customerPhone: item.details.customer_phone || null,
+          slot: item.details.slot_code,
+          slotId: item.details.slot_id,
+          timeIn: item.details.time_in,
+          durationMinutes: item.details.duration_minutes ?? Math.round((item.details.duration || 0) * 60),
+          hasPwdPermit: item.details.has_pwd_permit,
+          attendant: item.actor_id,
+          createdAt: item.created_at,
+          status: wasVoided ? 'voided' : (liveStatus || 'active'),
+          details: item.details,
+        };
+      });
 
       setRecentEntries(entries);
     } catch (error) {
@@ -309,7 +367,27 @@ export default function ManualEntry() {
   };
 
   const handleVoidEntry = async (entry: ManualEntry) => {
-    if (!confirm('Are you sure you want to void this manual entry?')) return;
+    // Void exists to undo an immediate mistake (wrong plate typed, wrong
+    // slot picked), not to end an active parking session -- doing that
+    // releases the slot with no payment collected and no record of the
+    // time used, which is never the intended flow (use Cash Payment for
+    // that). It can't be outright blocked -- genuine mistakes do happen,
+    // even minutes later -- so once the entry has been sitting long enough
+    // that a car is almost certainly actually parked there, make it much
+    // harder to do by accident instead of a generic "are you sure?".
+    const minutesSinceEntry = (Date.now() - new Date(entry.timeIn).getTime()) / 60000;
+    const VOID_GRACE_PERIOD_MINUTES = 5;
+
+    if (minutesSinceEntry > VOID_GRACE_PERIOD_MINUTES) {
+      const confirmed = await dialog.confirm(
+        `This vehicle checked in ${Math.round(minutesSinceEntry)} minutes ago and is very likely still parked in ${entry.slot} right now. Voiding it will immediately free the slot with NO PAYMENT collected and no record this ever happened -- this is not how a normal parking session should end; use Cash Payment for that instead.\n\nOnly continue if this entry genuinely needs to be erased.`,
+        'This Looks Like An Active Session, Not A Mistake',
+        { confirmLabel: 'Void Anyway', danger: true }
+      );
+      if (!confirmed) return;
+    } else {
+      if (!(await dialog.confirm('Are you sure you want to void this manual entry?'))) return;
+    }
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -319,7 +397,7 @@ export default function ManualEntry() {
         .from('audit_log')
         .update({
           details: {
-            ...(entry as any).details,
+            ...entry.details,
             status: 'voided',
             voided_by: user?.id,
             voided_at: new Date().toISOString(),
@@ -356,7 +434,7 @@ export default function ManualEntry() {
       loadSlots();
     } catch (error) {
       console.error('Error voiding entry:', error);
-      alert('Failed to void entry');
+      await dialog.alert('Failed to void entry');
     }
   };
 
@@ -392,8 +470,9 @@ export default function ManualEntry() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? 'Sound alerts on' : 'Sound alerts off'}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -489,10 +568,14 @@ export default function ManualEntry() {
                   disabled={saving}
                 >
                   <option value="">Select a slot</option>
-                  {slots.map(slot => (
-                    <option key={slot.id} value={slot.id}>
-                      {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
-                    </option>
+                  {groupSlotsByFloor(slots).map(group => (
+                    <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                      {group.slots.map(slot => (
+                        <option key={slot.id} value={slot.id}>
+                          {slot.slot_code} {slot.is_pwd ? '(PWD)' : ''}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
                 {slots.length === 0 && (
@@ -584,7 +667,9 @@ export default function ManualEntry() {
                   <div
                     key={entry.id}
                     className={`p-4 border rounded-lg ${
-                      entry.status === 'voided' ? 'bg-gray-50 border-gray-200 opacity-60' : 'border-gray-200'
+                      entry.status === 'voided' || entry.status === 'cancelled' || entry.status === 'no_show'
+                        ? 'bg-gray-50 border-gray-200 opacity-60'
+                        : 'border-gray-200'
                     }`}
                   >
                     <div className="flex justify-between items-start mb-2">
@@ -592,9 +677,7 @@ export default function ManualEntry() {
                         <p className="font-semibold text-gray-900">{entry.plate}</p>
                         <p className="text-sm text-gray-600">{entry.slot}</p>
                       </div>
-                      <span className={`px-2 py-1 rounded text-xs font-medium ${
-                        entry.status === 'voided' ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-800'
-                      }`}>
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getEntryStatusBadgeClass(entry.status)}`}>
                         {entry.status}
                       </span>
                     </div>
@@ -627,7 +710,7 @@ export default function ManualEntry() {
                       )}
                     </div>
 
-                    {isAdmin && entry.status === 'active' && (
+                    {isAdmin && isVoidableStatus(entry.status) && (
                       <div className="mt-3 flex gap-2">
                         <button
                           onClick={() => handleVoidEntry(entry)}

@@ -3,10 +3,27 @@
 -- No demo users are created here. Create the first admin in
 -- Supabase Authentication > Users, then promote it (see the end of this file).
 
--- 20 slots (A1-A20), A1 and A2 are PWD slots
-INSERT INTO slots (slot_code, is_pwd, status)
-SELECT 'A' || n, (n IN (1, 2)), 'available'
-FROM generate_series(1, 20) AS n
+-- 3-floor parking map, 34 slots per floor (102 total), matching the
+-- actual reference images (desktop/src/assets/floor-maps/floor-{n}.png)
+-- pixel-for-pixel: one double-loaded aisle block ("block_a", 24 slots --
+-- a top row and a bottom row of 12), and a single-file "side" column
+-- along the far wall (10 slots). Top-row columns 11/12 (nearest the
+-- elevator/stairs core drawn in the image) are PWD.
+-- zone/zone_row/zone_col feed the visual layout only -- see schema.sql.
+-- "compact" and "block_b" are no longer used (the schema's zone CHECK
+-- still allows them for upgrade compatibility, but nothing seeds them).
+
+-- Block A: {floor}A1..{floor}A24 (top row 1-12, bottom row 13-24)
+INSERT INTO slots (slot_code, is_pwd, status, floor, zone, zone_row, zone_col)
+SELECT f::text || 'A' || ((r - 1) * 12 + c)::text, (r = 1 AND c IN (11, 12)), 'available', f, 'block_a',
+       CASE WHEN r = 1 THEN 'top' ELSE 'bottom' END, c
+FROM generate_series(1, 3) AS f, generate_series(1, 2) AS r, generate_series(1, 12) AS c
+ON CONFLICT (slot_code) DO NOTHING;
+
+-- Side column: {floor}S1..{floor}S10
+INSERT INTO slots (slot_code, is_pwd, status, floor, zone, zone_row, zone_col)
+SELECT f::text || 'S' || n::text, FALSE, 'available', f, 'side', NULL, n
+FROM generate_series(1, 3) AS f, generate_series(1, 10) AS n
 ON CONFLICT (slot_code) DO NOTHING;
 
 -- Default rates (only if the table is empty)

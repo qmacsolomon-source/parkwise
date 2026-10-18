@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Rate } from '@parkwise/shared';
 import {
-  DollarSign, AlertTriangle, CheckCircle, LogOut, Bell,
+  DollarSign, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RotateCcw, History, Clock, Shield
 } from 'lucide-react';
 
@@ -300,8 +300,9 @@ export default function RatesAndPricing() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}

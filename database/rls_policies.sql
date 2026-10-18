@@ -257,8 +257,15 @@ CREATE POLICY "Users can view own audit entries" ON audit_log
 CREATE POLICY "Admins can view all audit entries" ON audit_log
   FOR SELECT USING (is_admin());
 
+-- actor_id = auth.uid() alone would block the database's own audit triggers
+-- (e.g. audit_reservation_changes() logs actor_id = NEW.customer_id, the
+-- walk-in customer -- not auth.uid(), the attendant performing the Manual
+-- Entry) -- that combination previously made every attendant-created
+-- reservation's own audit trigger violate this policy and roll back the
+-- whole insert with a 403. Staff may log an entry for anyone (same pattern
+-- as the walk-in policies above); everyone else only for themselves.
 CREATE POLICY "System can insert audit entries" ON audit_log
-  FOR INSERT WITH CHECK (actor_id = auth.uid());
+  FOR INSERT WITH CHECK (actor_id = auth.uid() OR is_staff());
 
 -- ManualEntry's void-entry flow marks an existing audit record's details as
 -- voided via .update(); no UPDATE policy existed before this. Postgres RLS

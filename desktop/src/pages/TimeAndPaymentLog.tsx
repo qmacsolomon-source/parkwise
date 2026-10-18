@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useDialog } from '../contexts/DialogContext';
 import { supabase } from '@parkwise/shared';
 import { Reservation, Payment, Profile, Vehicle, Slot, VerificationEvent } from '@parkwise/shared';
 import {
   FileText, Search, Download, ChevronLeft, ChevronRight,
-  AlertTriangle, LogOut, Bell, Edit3, X, Camera
+  AlertTriangle, LogOut, Volume2, VolumeX, Edit3, X, Camera
 } from 'lucide-react';
 
 interface LogEntry {
@@ -27,6 +28,7 @@ interface LogEntry {
 
 export default function TimeAndPaymentLog() {
   const { profile, logout } = useAuth();
+  const dialog = useDialog();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,17 +85,25 @@ export default function TimeAndPaymentLog() {
       }
 
       // Apply search
+      // Note: searching by customer name / plate number would require filtering on
+      // joined tables (profiles/vehicles). PostgREST rejects that inside an `.or()`
+      // unless those embeds are forced to an inner join, which would also silently
+      // drop any reservation with a missing customer or vehicle link from every
+      // query (not just search). Rather than risk that regression, search is
+      // scoped to `booking_code`, a column on `reservations` itself, which works
+      // reliably. Full plate/customer search would need a DB-side view or RPC.
       if (searchQuery) {
-        query = query.or(`booking_code.ilike.%${searchQuery}%,profiles.full_name.ilike.%${searchQuery}%,vehicles.plate_number.ilike.%${searchQuery}%`);
+        query = query.ilike('booking_code', `%${searchQuery}%`);
       }
 
       // Apply sorting
+      // Note: only columns that live directly on the `reservations` table can be
+      // sorted server-side via PostgREST. Columns from joined tables (plate,
+      // customer, total) can't be used with a plain `.order()` call without a
+      // DB-level view/RPC, so sorting by those is intentionally not offered.
       const columnMap: Record<string, string> = {
         timeIn: 'start_time',
         timeOut: 'end_time',
-        total: 'payments.total',
-        customer: 'profiles.full_name',
-        plate: 'vehicles.plate_number',
       };
       const sortColumn = columnMap[sortBy] || 'start_time';
       query = query.order(sortColumn, { ascending: sortOrder === 'asc' });
@@ -112,7 +122,16 @@ export default function TimeAndPaymentLog() {
       // Transform data to log entries
       const logEntries: LogEntry[] = (data || []).map((item: any) => {
         const reservation = item as Reservation;
-        const payment = item.payments as (Payment & { attendant?: { full_name: string } }) | null;
+        // payments.reservation_id has no UNIQUE constraint, so PostgREST
+        // treats reservations -> payments as one-to-many and always embeds
+        // it as an array, even though there's only ever one payment per
+        // reservation in practice (CashPayment checks for an existing one
+        // before inserting). Treating that array as a single object made
+        // every .base_charge/.total/etc access silently undefined, which
+        // is why every row in this log showed $0.00 regardless of what was
+        // actually paid.
+        const paymentsEmbed = item.payments as (Payment & { attendant?: { full_name: string } })[] | null;
+        const payment = paymentsEmbed?.[0] || null;
         const customer = item.profiles as Profile;
         const vehicle = item.vehicles as Vehicle;
         const slot = item.slots as Slot;
@@ -182,21 +201,24 @@ export default function TimeAndPaymentLog() {
 
     setSavingAnnotation(true);
     try {
-      await supabase
+      const { error } = await supabase
         .from('reservations')
         .update({ annotation: annotationText })
         .eq('id', selectedEntry.reservationId);
 
+      if (error) throw error;
+
       // Update local state
-      setEntries(prev => prev.map(e => 
+      setEntries(prev => prev.map(e =>
         e.id === selectedEntry.id ? { ...e, annotation: annotationText } : e
       ));
+      setSelectedEntry(prev => prev ? { ...prev, annotation: annotationText } : prev);
 
       setShowAnnotationModal(false);
       setAnnotationText('');
     } catch (error) {
       console.error('Error saving annotation:', error);
-      alert('Failed to save annotation');
+      await dialog.alert('Failed to save annotation');
     } finally {
       setSavingAnnotation(false);
     }
@@ -256,8 +278,9 @@ export default function TimeAndPaymentLog() {
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className={`p-2 rounded-lg ${soundEnabled ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-600'}`}
+              title={soundEnabled ? "Sound alerts on" : "Sound alerts off"}
             >
-              <Bell size={18} />
+              {soundEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
             </button>
             <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
               {profile?.role}
@@ -281,7 +304,7 @@ export default function TimeAndPaymentLog() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
               <input
                 type="text"
-                placeholder="Search by plate, customer, booking code..."
+                placeholder="Search by booking code..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="input pl-10"
@@ -290,7 +313,7 @@ export default function TimeAndPaymentLog() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="input"
+              className="input md:w-auto md:max-w-[180px] flex-shrink-0"
             >
               <option value="all">All Status</option>
               <option value="completed">Completed</option>
@@ -301,13 +324,13 @@ export default function TimeAndPaymentLog() {
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="input"
+              className="input md:w-auto md:max-w-[160px] flex-shrink-0"
             />
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="input"
+              className="input md:w-auto md:max-w-[160px] flex-shrink-0"
             />
             <button
               onClick={handleExportCSV}
@@ -324,23 +347,14 @@ export default function TimeAndPaymentLog() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-gray-200">
-                <th
-                  onClick={() => handleSort('plate')}
-                  className="px-4 py-3 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-50"
-                >
-                  Plate {sortBy === 'plate' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  Plate
                 </th>
-                <th
-                  onClick={() => handleSort('slot')}
-                  className="px-4 py-3 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-50"
-                >
-                  Slot {sortBy === 'slot' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  Slot
                 </th>
-                <th
-                  onClick={() => handleSort('customer')}
-                  className="px-4 py-3 text-left text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-50"
-                >
-                  Customer {sortBy === 'customer' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
+                  Customer
                 </th>
                 <th
                   onClick={() => handleSort('timeIn')}
@@ -366,11 +380,8 @@ export default function TimeAndPaymentLog() {
                 <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
                   Penalty
                 </th>
-                <th
-                  onClick={() => handleSort('total')}
-                  className="px-4 py-3 text-right text-sm font-semibold text-gray-700 cursor-pointer hover:bg-gray-50"
-                >
-                  Total {sortBy === 'total' && (sortOrder === 'asc' ? '↑' : '↓')}
+                <th className="px-4 py-3 text-right text-sm font-semibold text-gray-700">
+                  Total
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">
                   Attendant
