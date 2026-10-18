@@ -2,9 +2,16 @@ import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 import { colors, spacing, borderRadius, fontSize } from '../theme';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
 
-export default function RegistrationScreen({ navigation }: any) {
+type RootStackParamList = {
+  Login: undefined;
+  Registration: undefined;
+};
+
+export default function RegistrationScreen() {
   const { register } = useAuth();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');

@@ -26,55 +26,78 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
+    let cancelled = false;
+    const SESSION_TIMEOUT_MS = 5000;
+
+    console.log('[startup] auth provider mounted, session check started');
+
     const initAuth = async () => {
+      let session: Awaited<ReturnType<typeof authService.getSession>> = null;
+
       try {
-        const session = await authService.getSession();
-        if (session?.user) {
-          const profile = await authService.getProfile(session.user.id);
+        // Never let the session check block the UI forever.
+        session = await Promise.race([
+          authService.getSession(),
+          new Promise<null>((resolve) =>
+            setTimeout(() => {
+              console.warn(
+                `[startup] session check timed out after ${SESSION_TIMEOUT_MS}ms, falling back to signed-out`
+              );
+              resolve(null);
+            }, SESSION_TIMEOUT_MS)
+          ),
+        ]);
+      } catch (error) {
+        console.error('[startup] session check failed:', error);
+        session = null;
+      } finally {
+        // Always clear the loading flag, whatever happened above.
+        if (!cancelled) {
+          console.log('[startup] session check finished, signedIn =', !!session?.user);
           setState({
-            user: session.user,
-            profile,
-            loading: false,
-          });
-        } else {
-          setState({
-            user: null,
+            user: session?.user ?? null,
             profile: null,
             loading: false,
           });
         }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
-        setState({
-          user: null,
-          profile: null,
-          loading: false,
-        });
+      }
+
+      // Profile is fetched after loading is cleared so it can never block navigation.
+      if (session?.user && !cancelled) {
+        try {
+          const profile = await authService.getProfile(session.user.id);
+          if (!cancelled) setState((prev) => ({ ...prev, profile }));
+        } catch (error) {
+          console.error('[startup] profile fetch failed:', error);
+        }
       }
     };
 
     initAuth();
 
     const { data: { subscription } } = authService.onAuthStateChange(
-      async (event, session) => {
-        if (session?.user) {
-          const profile = await authService.getProfile(session.user.id);
-          setState({
-            user: session.user,
-            profile,
-            loading: false,
-          });
-        } else {
-          setState({
-            user: null,
-            profile: null,
-            loading: false,
-          });
+      // Keep this callback synchronous: awaiting Supabase inside it can deadlock auth init.
+      (event, session) => {
+        console.log('[startup] auth state changed:', event);
+
+        if (!session?.user) {
+          setState({ user: null, profile: null, loading: false });
+          return;
         }
+
+        setState({ user: session.user, profile: null, loading: false });
+
+        authService
+          .getProfile(session.user.id)
+          .then((profile) => setState((prev) => ({ ...prev, profile })))
+          .catch((error) => console.error('[startup] profile fetch after auth change failed:', error));
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const login = async (email: string, password: string, rememberMe?: boolean) => {
