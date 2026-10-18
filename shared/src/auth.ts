@@ -41,8 +41,34 @@ export const authService = {
 
     if (error) throw error;
 
-    // Database trigger handle_new_user() will create the profile with role='customer'
-    // After signup, insert the customer's vehicle if plate number provided
+    // There is no database trigger creating this row - checked the live
+    // project directly, no handle_new_user() function exists there despite
+    // this comment previously claiming otherwise. Insert it ourselves.
+    // Requires the "Users can insert own profile" RLS policy (profiles,
+    // auth.uid() = id AND role = 'customer') - signUp() only grants a
+    // session immediately if email confirmation is off; if it's on, there's
+    // no session yet to insert under, and this will need a fallback at
+    // first-login time instead (not yet implemented).
+    if (data.user) {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: data.user.id,
+          full_name: credentials.full_name,
+          email: credentials.email.toLowerCase(),
+          phone: credentials.phone,
+          role: 'customer',
+          status: 'active',
+          pwd_permit_number: credentials.pwd_permit_number || null,
+          pwd_verified: false,
+        }, { onConflict: 'id' });
+
+      if (profileError) {
+        console.error('Profile creation error:', profileError);
+      }
+    }
+
+    // Insert the customer's vehicle if plate number provided
     if (data.user && credentials.plate_number) {
       const { error: vehicleError } = await supabase
         .from('vehicles')

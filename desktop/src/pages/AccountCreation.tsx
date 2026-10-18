@@ -116,30 +116,48 @@ export default function AccountCreation() {
         return;
       }
 
-      // Wait for profile to be created by trigger
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Update profile with additional fields
-      if (authData.user) {
-        await supabase
-          .from('profiles')
-          .update({
-            full_name: fullName,
-            phone: '',
-            role: role,
-            status: 'active',
-            pwd_permit_number: null,
-            pwd_verified: false,
-          })
-          .eq('id', authData.user.id);
-      }
-
-      // Restore the admin's own session
+      // Restore the admin's own session before anything else. signUp() just
+      // swapped the active session to the brand-new user, and the profiles
+      // insert below is only allowed under RLS for an admin (or for the new
+      // user acting on their own row, which there's no policy for) - so this
+      // swap-back has to happen first, not after, or the insert gets
+      // silently rejected.
       if (adminSession.session) {
         await supabase.auth.setSession({
           access_token: adminSession.session.access_token,
           refresh_token: adminSession.session.refresh_token,
         });
+      }
+
+      // No database trigger creates a profiles row on signup - there isn't
+      // one in the live project (confirmed: pg_get_functiondef finds no
+      // handle_new_user() function at all), despite comments elsewhere in
+      // this codebase assuming there is. Every account created through this
+      // form before this fix ended up with a real auth.users login but zero
+      // matching profiles row - permanently "Access Denied" until someone
+      // noticed and patched it in by hand. Insert it ourselves instead of
+      // waiting on a trigger that was never actually there.
+      let profileError = null;
+      if (authData.user) {
+        const result = await supabase
+          .from('profiles')
+          .upsert({
+            id: authData.user.id,
+            full_name: fullName,
+            email: email.toLowerCase(),
+            phone: '',
+            role: role,
+            status: 'active',
+            pwd_permit_number: null,
+            pwd_verified: false,
+          }, { onConflict: 'id' });
+        profileError = result.error;
+      }
+
+      if (profileError) {
+        setError(`Login was created, but the profile failed to save: ${profileError.message}. The account won't be able to sign in until this is fixed.`);
+        setLoading(false);
+        return;
       }
 
       // Log to audit_log

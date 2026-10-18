@@ -472,3 +472,36 @@ This is unrelated to reassigning a reservation to a different slot - that's a se
 Traced from "I created an account and couldn't log in" - a live Supabase project requires the new user to confirm their email before they can sign in at all (this repo's `supabase/config.toml` has confirmations off, but that file only governs a local `supabase start` instance, not your actual hosted project). Since Account Creation's "welcome email with the temporary password" is aspirational only (see below), there was no way to find that out - the login screen just said "Incorrect email or password" no matter what the real reason was, because `Login.tsx` flattened every login error into that one generic message. Fixed to detect Supabase's "Email not confirmed" error specifically and show the real reason instead ("Please confirm your email before logging in..."), and to not count that toward the failed-attempt lockout, since it isn't a wrong-password situation. Immediate unblock for any account already stuck like this: Supabase Dashboard -> Authentication -> Users -> that user -> manually confirm their email.
 
 Also flagged while investigating: Account Creation's password field is labeled "Temporary Password" with a note promising the user "will receive a welcome email with their temporary password" and "will be required to change their password upon first login" - neither half of that is actually implemented. No custom email is sent (only Supabase's default confirmation email, which doesn't contain the password), and nothing anywhere reads the `force_password_change` flag that gets stamped on signup to actually force a change. Left as-is for now since it's a bigger feature (the email part needs a Supabase Edge Function with a service-role key, same pattern as Round 5's Reset Password fix) - noted here so it doesn't get mistaken for working.
+
+## ⚠️ Action required on the live Supabase project (this round)
+
+Run `database/rls_policies.sql` again in the Supabase SQL Editor (safe to re-run, same as always) - it adds one new policy described below that staff account creation and customer signup both now depend on.
+
+## Round 19: accounts created through the app never actually got a working login - found while chasing the account creation issue above
+
+Digging into why `marga@gmail.com` couldn't log in even after fixing the email-confirmation issue turned up something much bigger. Every comment in this codebase ("Wait for profile to be created by trigger", "Database trigger handle_new_user() will create the profile with role='customer'") assumes a database trigger creates each new user's `profiles` row automatically. Checked the live project directly:
+
+```sql
+select pg_get_functiondef(oid) from pg_proc where proname = 'handle_new_user';
+```
+
+Zero rows. That function doesn't exist. Never did, as far as either of us could tell. So every account ever created through either signup path - desktop's Account Creation form, and the mobile app's customer self-registration (`shared/src/auth.ts`) - has only ever gotten a real `auth.users` login with **zero matching `profiles` row**. The desktop flow's `.update()` afterward silently touched 0 rows (Supabase doesn't error on that), and the mobile flow never even attempted an insert. Confirmed directly against `marga@gmail.com`: a real row in `auth.users`, `NULL` everywhere when joined to `profiles`. That's exactly the "Access Denied / customers should use the mobile app" screen, for a completely different reason than it looks like - not an actual customer, just nobody there at all.
+
+Fixed both signup paths to insert the `profiles` row themselves instead of waiting on a trigger that was never there:
+
+- **`AccountCreation.tsx`**: the tricky part here is *session*, not just the missing insert - `signUp()` immediately swaps the browser's active session to the brand-new user (there's no service-role key available client-side to avoid this), and the existing RLS policy only allows an **admin's own session** to insert a profiles row. So the admin's session now has to be restored *before* the insert runs, not after like the old code did - reordered that, then insert the full profile (name, email, role, status) as the now-restored admin. If the insert itself still fails for some reason, that's now surfaced as a real error message instead of silently leaving a stranded account.
+- **`shared/src/auth.ts`** (used by the mobile app): a self-registering customer has no admin session to borrow - they need to be able to insert their *own* row. There was no RLS policy allowing that at all, so added one: `"Users can insert own profile" FOR INSERT WITH CHECK (auth.uid() = id AND role = 'customer')` - deliberately pinned to `role = 'customer'` only, so a self-signup can never insert itself as staff. Then inserted the profile right after `signUp()` succeeds, same shape as the desktop fix.
+
+**Known remaining gap, flagged but not fixed here**: `signUp()` only hands back an active session immediately if email confirmation is off project-wide. If it's on, there's no session yet at the moment of signup, so a customer's own self-insert has nothing to authenticate as and would silently fail the same way the old code did - just for a new reason. The real fix for that case is creating the profile lazily on first login instead of at signup time (check-then-insert in the login flow), which hasn't been built. Worth doing if customer self-signup keeps misbehaving even after this round.
+
+**For any accounts already stranded by this** (created before this fix, like `marga@gmail.com` was): find them with the same query used to diagnose this -
+
+```sql
+select au.id, au.email, p.id as profile_id
+from auth.users au
+left join profiles p on p.id = au.id
+where p.id is null
+order by au.created_at desc;
+```
+
+- then insert a matching `profiles` row by hand for each one (full_name, email, phone, role, status at minimum), same as was done for `marga@gmail.com` this round.
