@@ -381,7 +381,10 @@ export default function LiveOccupancyDashboard() {
           reservation={selectedSlot.current_reservation_id ? reservations[selectedSlot.current_reservation_id] : undefined}
           vehicle={selectedSlot.current_reservation_id ? vehicles[reservations[selectedSlot.current_reservation_id]?.vehicle_id] : undefined}
           customer={selectedSlot.current_reservation_id ? customers[vehicles[reservations[selectedSlot.current_reservation_id]?.vehicle_id]?.owner_id] : undefined}
-          onClose={() => setShowDrawer(false)}
+          onClose={() => {
+            setShowDrawer(false);
+            setSelectedSlot(null);
+          }}
           onRefresh={loadData}
         />
       )}
