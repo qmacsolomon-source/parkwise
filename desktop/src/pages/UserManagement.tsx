@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Profile } from '@parkwise/shared';
 import {
@@ -24,7 +25,7 @@ export default function UserManagement() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   
   // Search and filter
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('user-management:search-query', '');
   const [roleFilter, setRoleFilter] = useState<'all' | 'customer' | 'attendant' | 'admin'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'disabled'>('all');
   
@@ -43,9 +44,10 @@ export default function UserManagement() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   
   // Form states
-  const [editForm, setEditForm] = useState({ full_name: '', email: '', phone: '', role: '' });
-  const [penaltyReason, setPenaltyReason] = useState('');
-  const [penaltyAmount, setPenaltyAmount] = useState('');
+  const [editForm, setEditForm] = usePersistedState('user-management:edit-form', { full_name: '', email: '', phone: '', role: '' });
+  const [penaltyReason, setPenaltyReason] = usePersistedState('user-management:penalty-reason', '');
+  const [penaltyAmount, setPenaltyAmount] = usePersistedState('user-management:penalty-amount', '');
+  // Not persisted - see usePersistedState's own comment on excluding passwords.
   const [newPassword, setNewPassword] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 

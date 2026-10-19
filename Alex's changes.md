@@ -529,3 +529,23 @@ Left for a future round, not fixed here: the error banner rendering behind the s
 Chasing a persistent "Email address ... is invalid" rejection from Supabase on an address that looked completely normal turned up a real gap: `validateForm()` checked `email.trim()` for emptiness, but then ran the actual format regex - and everything downstream, including what gets sent to `signUp()` - against the raw, untrimmed field value. Ordinary leading/trailing spaces would still get caught by the regex itself, but an invisible/zero-width character (the kind that can survive copy-pasting an address across several different apps, which this one had been all night) isn't matched by `\s` and could slide straight through the app's own check while still getting correctly rejected by Supabase's stricter server-side validation - looking identical on screen the whole time.
 
 Switched every use of the email field in this file to `email.trim().toLowerCase()` - the duplicate-email lookup, the regex check, the `signUp()` call, and the profile insert - so they all agree on the same value. Worth being upfront about the limit here: `.trim()` only strips ordinary whitespace, not every kind of invisible Unicode character, so this closes the most common version of the problem without being a guaranteed fix for every possible hidden-character case.
+
+## Round 22: typed form content no longer disappears on an accidental page refresh
+
+Requested system-wide, not for one specific page - a refresh mid-entry was wiping out whatever was already typed, same as a browser tab closing with unsaved work.
+
+New shared piece: `desktop/src/hooks/usePersistedState.ts` - a drop-in replacement for `useState` that also mirrors its value into `sessionStorage` (not `localStorage` - it only needs to survive a refresh of the same tab, not linger indefinitely once the tab is actually closed) and rehydrates from there on mount. Each field gets its own namespaced key (`parkwise:draft:<page>:<field>`) so nothing collides between pages.
+
+Applied it to every genuinely typed field across the app where losing it would actually cost someone real work:
+- **Account Creation**: full name, email, role
+- **Manual Entry**: plate number, customer name/phone, selected slot, duration, PWD checkbox
+- **Plate Verification**: search box, override reason, flag reason
+- **Time & Payment Log**: search box, date range, the annotation note text
+- **User Management**: search box, the edit-user form, penalty reason/amount
+- **Cash Payment**: amount received
+- **Reports**: the date range filter
+- **Live Occupancy**: search box
+
+Deliberately **not** applied to password fields anywhere (the hook's own comment says why - plain-text `sessionStorage` isn't somewhere a password, even a half-typed one, should sit even temporarily) - Account Creation's password, User Management's "new password" field, and the login form were all left as plain `useState`.
+
+Also skipped two kinds of state on purpose, since persisting them wouldn't actually do anything useful: pages where a form field gets overwritten by a fresh database fetch on every mount (Rates & Pricing's rate inputs - the fetch-on-load would just stomp over any restored draft immediately, making the persistence pointless without a real draft-vs-live-data reconciliation step this didn't seem worth building tonight), and state that only exists inside a modal that itself resets to closed on refresh (Live Occupancy's alert-resolution note - restoring the text wouldn't matter if the modal holding it isn't open to show it). Slot Assignment and the Login page were left alone too - no free-text field there where losing a few typed characters costs anything beyond retyping a short value.

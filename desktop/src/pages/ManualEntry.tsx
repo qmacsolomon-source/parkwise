@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, ReservationStatus, groupSlotsByFloor } from '@parkwise/shared';
 import {
@@ -75,14 +76,15 @@ export default function ManualEntry() {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Form state
-  const [plateNumber, setPlateNumber] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [selectedSlot, setSelectedSlot] = useState('');
-  const [durationHours, setDurationHours] = useState(1);
-  const [durationMinutes, setDurationMinutes] = useState(0);
-  const [hasPwdPermit, setHasPwdPermit] = useState(false);
+  // Form state - persisted so an accidental refresh mid-entry doesn't lose
+  // what the attendant already typed in for a walk-in customer.
+  const [plateNumber, setPlateNumber] = usePersistedState('manual-entry:plate-number', '');
+  const [customerName, setCustomerName] = usePersistedState('manual-entry:customer-name', '');
+  const [customerPhone, setCustomerPhone] = usePersistedState('manual-entry:customer-phone', '');
+  const [selectedSlot, setSelectedSlot] = usePersistedState('manual-entry:selected-slot', '');
+  const [durationHours, setDurationHours] = usePersistedState('manual-entry:duration-hours', 1);
+  const [durationMinutes, setDurationMinutes] = usePersistedState('manual-entry:duration-minutes', 0);
+  const [hasPwdPermit, setHasPwdPermit] = usePersistedState('manual-entry:has-pwd-permit', false);
 
   const isAdmin = profile?.role === 'admin';
 

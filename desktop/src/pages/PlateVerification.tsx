@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle, groupSlotsByFloor } from '@parkwise/shared';
 import {
@@ -22,14 +23,14 @@ export default function PlateVerification() {
   
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('plate-verification:search-query', '');
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  
+
   const [showManualOverride, setShowManualOverride] = useState(false);
-  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideReason, setOverrideReason] = usePersistedState('plate-verification:override-reason', '');
   const [showFlagModal, setShowFlagModal] = useState(false);
-  const [flagReason, setFlagReason] = useState('');
+  const [flagReason, setFlagReason] = usePersistedState('plate-verification:flag-reason', '');
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   // Accept/Override/Flag only ever surfaced feedback on failure - a

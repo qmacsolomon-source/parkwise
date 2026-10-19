@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Reservation, Payment, Profile, Vehicle, Slot, VerificationEvent } from '@parkwise/shared';
 import {
@@ -31,10 +32,10 @@ export default function TimeAndPaymentLog() {
   const dialog = useDialog();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('time-payment-log:search-query', '');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = usePersistedState('time-payment-log:date-from', '');
+  const [dateTo, setDateTo] = usePersistedState('time-payment-log:date-to', '');
   const [sortBy, setSortBy] = useState('timeIn');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -45,7 +46,7 @@ export default function TimeAndPaymentLog() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [verificationEvents, setVerificationEvents] = useState<VerificationEvent[]>([]);
   const [showAnnotationModal, setShowAnnotationModal] = useState(false);
-  const [annotationText, setAnnotationText] = useState('');
+  const [annotationText, setAnnotationText] = usePersistedState('time-payment-log:annotation-text', '');
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);

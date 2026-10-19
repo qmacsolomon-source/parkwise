@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -28,8 +29,8 @@ interface ReportData {
 export default function Reports() {
   const { profile, logout } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = usePersistedState('reports:date-from', '');
+  const [dateTo, setDateTo] = usePersistedState('reports:date-to', '');
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);

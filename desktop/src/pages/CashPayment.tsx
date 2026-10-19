@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Rate, Penalty, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -36,7 +37,7 @@ export default function CashPayment() {
   
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [calculation, setCalculation] = useState<PaymentCalculation | null>(null);
-  const [amountReceived, setAmountReceived] = useState('');
+  const [amountReceived, setAmountReceived] = usePersistedState('cash-payment:amount-received', '');
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState('');

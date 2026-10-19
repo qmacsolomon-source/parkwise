@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -29,7 +30,7 @@ export default function LiveOccupancyDashboard() {
   const [customers, setCustomers] = useState<Record<string, Profile>>({});
   const [vehicles, setVehicles] = useState<Record<string, Vehicle>>({});
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('live-occupancy:search-query', '');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPwdOnly, setFilterPwdOnly] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);

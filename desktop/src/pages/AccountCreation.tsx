@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
+import { usePersistedState } from '../hooks/usePersistedState';
 import {
   UserPlus, AlertTriangle, CheckCircle, LogOut,
   Eye, EyeOff, Shield, Volume2, VolumeX
@@ -8,9 +9,11 @@ import {
 
 export default function AccountCreation() {
   const { profile, logout } = useAuth();
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'attendant' | 'admin'>('attendant');
+  const [fullName, setFullName] = usePersistedState('account-creation:full-name', '');
+  const [email, setEmail] = usePersistedState('account-creation:email', '');
+  const [role, setRole] = usePersistedState<'attendant' | 'admin'>('account-creation:role', 'attendant');
+  // Password is intentionally plain useState, not persisted - see
+  // usePersistedState's own comment on why passwords are excluded.
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
