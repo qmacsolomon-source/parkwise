@@ -63,22 +63,18 @@ export const authService = {
 
     if (error) throw error;
 
-<<<<<<< HEAD
     // Best-effort fallback for a database where handle_new_user() has not
-    // been installed yet. It already exists, is ignored on a duplicate, and
-    // a failure here must never fail the sign-up itself. Same normalisation
-    // as the metadata above, so both paths produce the same plate.
-    const fallbackPlate = normalizePlate(credentials.plate_number);
-    if (data.user && PLATE_PATTERN.test(fallbackPlate)) {
-=======
-    // There is no database trigger creating this row - checked the live
-    // project directly, no handle_new_user() function exists there despite
-    // this comment previously claiming otherwise. Insert it ourselves.
-    // Requires the "Users can insert own profile" RLS policy (profiles,
-    // auth.uid() = id AND role = 'customer') - signUp() only grants a
-    // session immediately if email confirmation is off; if it's on, there's
-    // no session yet to insert under, and this will need a fallback at
-    // first-login time instead (not yet implemented).
+    // been installed yet (confirmed directly against the live project: it
+    // doesn't exist there as of this writing, despite an earlier version of
+    // this comment claiming otherwise). Upserts, not inserts, so this is a
+    // harmless no-op once the trigger above is actually live and has
+    // already created both rows - never fails the sign-up itself either
+    // way. Requires the "Users can insert own profile" RLS policy
+    // (profiles, auth.uid() = id AND role = 'customer') for the profile
+    // half; signUp() only grants a session immediately if email
+    // confirmation is off - if it's on, there's no session yet to upsert
+    // under, and this needs a fallback at first-login time instead (not
+    // yet implemented).
     if (data.user) {
       const { error: profileError } = await supabase
         .from('profiles')
@@ -98,9 +94,10 @@ export const authService = {
       }
     }
 
-    // Insert the customer's vehicle if plate number provided
-    if (data.user && credentials.plate_number) {
->>>>>>> 4971f16c6b465754ab7a5026f7ce5b419b9cac14
+    // Same normalisation as the metadata above, so both paths produce the
+    // same plate.
+    const fallbackPlate = normalizePlate(credentials.plate_number);
+    if (data.user && PLATE_PATTERN.test(fallbackPlate)) {
       const { error: vehicleError } = await supabase
         .from('vehicles')
         .upsert(
