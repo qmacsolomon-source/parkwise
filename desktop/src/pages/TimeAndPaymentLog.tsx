@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Reservation, Payment, Profile, Vehicle, Slot, VerificationEvent } from '@parkwise/shared';
 import {
@@ -31,10 +32,10 @@ export default function TimeAndPaymentLog() {
   const dialog = useDialog();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('time-payment-log:search-query', '');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  const [dateFrom, setDateFrom] = usePersistedState('time-payment-log:date-from', '');
+  const [dateTo, setDateTo] = usePersistedState('time-payment-log:date-to', '');
   const [sortBy, setSortBy] = useState('timeIn');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
@@ -45,7 +46,7 @@ export default function TimeAndPaymentLog() {
   const [showDrawer, setShowDrawer] = useState(false);
   const [verificationEvents, setVerificationEvents] = useState<VerificationEvent[]>([]);
   const [showAnnotationModal, setShowAnnotationModal] = useState(false);
-  const [annotationText, setAnnotationText] = useState('');
+  const [annotationText, setAnnotationText] = usePersistedState('time-payment-log:annotation-text', '');
   const [savingAnnotation, setSavingAnnotation] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -426,15 +427,15 @@ export default function TimeAndPaymentLog() {
                       {entry.timeOut ? new Date(entry.timeOut).toLocaleString() : 'N/A'}
                     </td>
                     <td className="px-4 py-3 text-sm">{entry.duration}</td>
-                    <td className="px-4 py-3 text-sm text-right">${entry.baseCharge.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-sm text-right">₱{entry.baseCharge.toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-right text-red-600">
-                      {entry.surcharge > 0 ? `$${entry.surcharge.toFixed(2)}` : '-'}
+                      {entry.surcharge > 0 ? `₱${entry.surcharge.toFixed(2)}` : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-red-600">
-                      {entry.penalty > 0 ? `$${entry.penalty.toFixed(2)}` : '-'}
+                      {entry.penalty > 0 ? `₱${entry.penalty.toFixed(2)}` : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-bold">
-                      ${entry.total.toFixed(2)}
+                      ₱{entry.total.toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-sm">{entry.attendant || '-'}</td>
                     <td className="px-4 py-3">
@@ -516,7 +517,7 @@ export default function TimeAndPaymentLog() {
                   </div>
                   <div>
                     <span className="text-gray-600">Total:</span>
-                    <span className="ml-2 font-bold">${selectedEntry.total.toFixed(2)}</span>
+                    <span className="ml-2 font-bold">₱{selectedEntry.total.toFixed(2)}</span>
                   </div>
                   <div>
                     <span className="text-gray-600">Status:</span>

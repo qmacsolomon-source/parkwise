@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useDialog } from '../contexts/DialogContext';
+import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/shared';
 import {
@@ -29,7 +30,7 @@ export default function LiveOccupancyDashboard() {
   const [customers, setCustomers] = useState<Record<string, Profile>>({});
   const [vehicles, setVehicles] = useState<Record<string, Vehicle>>({});
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistedState('live-occupancy:search-query', '');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterPwdOnly, setFilterPwdOnly] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState<Slot | null>(null);
@@ -37,10 +38,8 @@ export default function LiveOccupancyDashboard() {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [alertedSlots, setAlertedSlots] = useState<Set<string>>(new Set());
   const [floor, setFloor] = useState(1);
-  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
 
   const handleFloorChange = (newFloor: number) => {
-    setFloorDirection(newFloor > floor ? 'up' : 'down');
     setFloor(newFloor);
   };
 
@@ -351,7 +350,7 @@ export default function LiveOccupancyDashboard() {
           <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
         </div>
 
-        <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+        <div>
           <ParkingFloorMap
             slots={filteredSlots}
             floor={floor}
@@ -383,7 +382,10 @@ export default function LiveOccupancyDashboard() {
           reservation={selectedSlot.current_reservation_id ? reservations[selectedSlot.current_reservation_id] : undefined}
           vehicle={selectedSlot.current_reservation_id ? vehicles[reservations[selectedSlot.current_reservation_id]?.vehicle_id] : undefined}
           customer={selectedSlot.current_reservation_id ? customers[vehicles[reservations[selectedSlot.current_reservation_id]?.vehicle_id]?.owner_id] : undefined}
-          onClose={() => setShowDrawer(false)}
+          onClose={() => {
+            setShowDrawer(false);
+            setSelectedSlot(null);
+          }}
           onRefresh={loadData}
         />
       )}

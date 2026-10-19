@@ -103,13 +103,21 @@ export default function Login() {
 
       navigate('/');
     } catch (err: any) {
-      const newAttempts = lockout.attempts + 1;
-      if (newAttempts >= MAX_ATTEMPTS) {
-        updateLockout(newAttempts, true);
-        setError('Too many failed attempts. Account locked for 15 minutes.');
+      // Email-not-confirmed isn't a wrong-password situation - don't count
+      // it toward the lockout or hide it behind the generic message, since
+      // "incorrect email or password" sends the person looking for a typo
+      // instead of the confirmation email that's actually blocking them.
+      if (err?.message?.toLowerCase().includes('email not confirmed')) {
+        setError('Please confirm your email before logging in - check your inbox for the confirmation link.');
       } else {
-        updateLockout(newAttempts, false);
-        setError('Incorrect email or password');
+        const newAttempts = lockout.attempts + 1;
+        if (newAttempts >= MAX_ATTEMPTS) {
+          updateLockout(newAttempts, true);
+          setError('Too many failed attempts. Account locked for 15 minutes.');
+        } else {
+          updateLockout(newAttempts, false);
+          setError('Incorrect email or password');
+        }
       }
     } finally {
       setLoading(false);

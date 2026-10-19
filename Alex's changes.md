@@ -351,3 +351,207 @@ Three direct UI complaints, all fixed:
 - **Slot Assignment's layout reordered**: the Slot Map card now comes first and spans the full page width (it was previously squeezed into the right half of a two-column grid, which is what made it look cramped). "Upcoming & Active Reservations" moved below it, now shown as a multi-column card grid instead of a single-column list, so it doesn't feel like wasted space now that it's not fighting the map for width.
 
 Verified live on both pages: List toggle is gone, the map fills the page width on Live Occupancy, the up/down arrows switch floors correctly (confirmed floor number and background image both update), and Slot Assignment's reordered layout still opens the right slot on click ("Manage Slot 1A1").
+
+## Round 11: real hand-marked click zones for all 69 stalls per floor, a coordinate tool to make that possible, and a slot-count correction (34 → 69/floor)
+
+Round 9's click zones were still *my* pixel measurements off the reference image - close, but an estimate, not ground truth. This round replaces that with exact, hand-placed boxes.
+
+### The coordinate-picker tool
+
+Built a separate small web tool (not part of the app - a standalone page) that loads each floor's real image and lets you drag a box over every actual stall, one at a time, then exports the exact pixel coordinates as JSON. Iterated on it a few rounds based on direct feedback:
+- Ctrl/Cmd+C a box's size, hover the next stall, Ctrl/Cmd+V to stamp a same-size box there instead of redrawing each one
+- Drag any existing box to reposition it; arrow keys nudge the selected box/group by 1px (10px with Shift) for fine alignment
+- A "Select" mode button to drag-select a group of boxes at once, then copy/paste or move the whole group together with spacing preserved - right-click-drag and Shift+drag also work as alternates where the browser/input device supports them, but the button doesn't depend on either
+
+You used it to mark all 69 real stalls on floor 1 (60 in the main block - 5 rows of 12, not the 2 rows this app previously assumed - plus 9 along the side wall) and exported the coordinates.
+
+### ⚠️ Action required on the live Supabase project - one file, once
+
+Marking the real stalls turned up a second correction: the actual layout is **69 slots per floor** (207 total), not the 34/floor from Round 9 - 5 rows of 12 in the main block (not 2 rows of 12), and 9 along the side wall (not 10). `database/migrate_hand_marked_layout.sql` (new, one-time) replaces the old layout with the correct one. Same safety check as every prior migration this project has used: confirmed zero reservations and zero payments reference any slot before writing a clean delete + recreate. Run it once in the Supabase SQL Editor; `seed.sql` is updated to match for fresh installs.
+
+Per your call: floors 2 and 3 reuse floor 1's exact hand-marked box layout rather than being marked separately - the real garage is the same physical layout on every floor, and the stall images differ from each other by only a few pixels (confirmed by measurement in Round 9), so re-marking two more floors by hand wasn't worth repeating. Same reasoning applies to PWD placement (columns 8-12 of each main-block row, side-column positions 1-5) - identical on all three floors.
+
+### `ParkingFloorMap.tsx`
+
+Replaced the measured-coordinate layout config with the 69 hand-marked boxes (60 main + 9 side), shared across all three floors, each zipped against its matching real slot by `zone_col` (1-60 for `block_a`, 1-9 for `side`) in the same reading order the boxes were drawn in. Verified live against the pre-migration data (so far only 24 real `block_a` slots exist) - markers land exactly on the real stalls, with the gap in unmarked rows showing cleanly rather than breaking, and clicking still opens the correct slot ("1A13 Details"). Full 69/floor fill confirmed once the migration above is run.
+
+### Markers: plain "floor-spot" text instead of an unlabeled dot
+
+The colored-dot markers from Round 9/10 were deliberately unlabeled (to match the reference image's clean, label-free look), but with 69 real stalls on screen at once that's not readable - you can't tell which dot is which without hovering each one. Replaced the dot with a small colored label reading **floor-spot**, e.g. `1-1` through `1-69` on floor 1, one continuous count across the main block then the side column (not the real slot code like `1A1`/`1S4`, which still exists underneath and is what's actually stored/used everywhere else - dropdowns, logs, receipts, search). Clicking still opens the correct slot ("1A2 Details" for the box labeled "1-2") - only the on-map label changed. Verified live: all 69 labels render clearly, colored by status, PWD slots still ring blue.
+
+### Fixed: floor 2 and 3 were slightly misaligned
+
+The coordinates were hand-marked against floor 1's actual image, but floors 2 and 3 are *separately generated* images - the overall composition matches, but stall positions shift by a handful of pixels from floor to floor (confirmed earlier, Round 9's measurement notes). That's exactly what caused the slight drift you flagged on floors 2/3.
+
+Fixed properly this time, not just approximated: `floor-2.png` and `floor-3.png` are now floor 1's actual image with only the floor-number digit (top-left and bottom-left) swapped in from each floor's original artwork - composited in Python with a feathered paste so there's no visible seam (checked closely; the faint line under each digit is a drop-shadow baked into floor 1's own original art, not an artifact). Everything else - every divider, tick mark, arrow, the elevator icon - is now byte-identical across all three floor images, so the same hand-marked coordinates land exactly right on every floor. Verified live: switched between all three floors, every one of the 69 labels sits precisely on its stall with no drift, only the corner digit and status data change.
+
+### PWD stalls now show an actual wheelchair badge, not just a blue ring
+
+You sent an updated version of the floor 1 reference with wheelchair-symbol badges drawn directly on the 10 PWD stalls (5 in the main row, 5 along the side). Pixel-diffed it against the live `floor-1.png` first to confirm it really was the same base image plus just the badges (it was - about 2.6% of pixels differed, in exactly 10 badge-shaped blobs, plus some incidental re-render noise elsewhere that was *not* copied over, to avoid reintroducing the floor-2/3 drift problem from the previous fix). Composited only those exact badge pixels onto the current, proven-aligned `floor-1.png`, then re-ran the same digit-swap process to propagate the badges into `floor-2.png`/`floor-3.png` too.
+
+No code changes needed - the badge shows through the existing translucent status marker cleanly (confirmed live, all three floors), so a PWD stall now visibly reads as a wheelchair icon at a glance instead of only a blue ring you'd have to notice.
+
+### Missed the arrow changes on the first pass - caught and fixed
+
+The first diff only picked up the 10 PWD badges; three arrow changes in the same upload got dismissed as the usual re-export noise without being checked closely enough - a real miss. Looked again properly: the right-side middle arrow is now a combined curve-and-down arrow (was a plain curve), and two brand-new arrows were added at the bottom (a straight one in the middle, a curved one on the right) that didn't exist before. All three sit in open floor area away from any stall or divider, so they were safe to composite in directly as full regions (not masked like the badges) without any alignment risk. Propagated through floor-2.png/floor-3.png the same way as before. Verified live again across all three floors - arrows match the upload, all 69 labels still land exactly on their stalls.
+
+## Round 12: dropped the rectangle behind each spot's label
+
+The floor-spot label (e.g. "1-23") was sitting inside a filled, rounded-rect badge colored by status. Dropped the badge entirely - each label is now just plain colored text straight on top of the real artwork, no box behind it. "Available" needed a color change to stay legible without a fill (the old muted gray read fine as a badge color but is nearly invisible as plain text on the gray asphalt) - it's near-white now, the other statuses (reserved/occupied/unverified/overstay/maintenance) keep their existing colors since those already pop as text. PWD no longer needs its own ring either, since the actual wheelchair badge is baked into the image now (Round 11) and would otherwise double up.
+
+Also found and fixed a real bug while testing this: clicking a stall showed a thick box outline that none of the app's own styling was producing - turned out to be the browser's native focus ring, which newer Chromium renders as a `box-shadow` instead of the classic `outline` property, so the usual `outline: none` fix silently didn't touch it. Fixed by explicitly zeroing both. Selection feedback is now a plain underline under the label instead of any kind of box. Verified live on both Live Occupancy and Slot Assignment - no boxes anywhere on the map, badges and arrows from Round 11 unaffected, clicking still opens the right slot.
+
+## Round 13: page jumping to the top on floor switch, and a line artifact under the floor-2/floor-3 number
+
+Two bugs reported together: switching floors while scrolled down sometimes snapped the whole page back to the top (not just the map), and floors 2/3's corner floor-number digit had a faint line under it that floor 1 didn't have.
+
+**Scroll jump**: the map's `<img>` had no explicit `aspect-ratio`, so on a floor switch the browser briefly collapsed it to near-zero height between the old image unloading and the new one decoding - a real layout shift, not just a visual flicker. If you were scrolled near the bottom when that shift happened, the browser clamps your scroll position to the new (temporarily shorter) page height, which reads as "jumping to the top." Fixed by giving the `<img>` an explicit `aspect-ratio: 1920 / 1080` in `ParkingFloorMap.tsx`, so its box never collapses regardless of image load timing. Verified live on both Live Occupancy and Slot Assignment: scrolled down, switched floors repeatedly, scroll position held every time.
+
+**Line under the floor-2/floor-3 digit**: this was a side effect of how Round 11's digit swap was done - the old approach blended a whole rectangular region (digit plus surrounding background) from one export onto another, and the two images' background dot-textures didn't line up pixel-for-pixel, leaving a faint seam at the blend edge. Neither source image was actually defective on its own - it was purely a seam from merging two independently-exported backgrounds. Redone with a tighter approach: mask out only the digit's own ink (by brightness), erase it to a locally-sampled flat background color, draw the new digit on top, and feather just the mask's own edge by 1px - no background pixels from the other image are brought in at all. Verified live on both corners of floor 2 and floor 3 (zoomed screenshots) - clean in both cases now, floor 1 untouched.
+
+No database changes this round - both fixes are frontend-only (`desktop/src/components/ParkingFloorMap.tsx` and the `floor-2.png`/`floor-3.png` assets).
+
+### Round 13 follow-up: the digit-line fix above had left a doubled gate post on floor 2/3
+
+The ink-mask erase used for the digit-line fix sampled its "local flat background" from too close to the bottom-left corner gate, and ended up duplicating part of a gate post next to the real one, plus tacking on a 3D-style gray cap that doesn't exist anywhere else in the artwork - visible as an extra yellow sliver and a mismatched post shape next to each real post on floor 2 and floor 3's bottom gate (floor 1 unaffected, since it was never touched by that fix).
+
+Fixed properly this time by not hand-reconstructing the post at all: floor 2 and floor 3 each have an identical, untouched top gate elsewhere in the same image, so the bottom gate (both posts plus the connecting bar) was replaced by mirroring that clean top-gate strip vertically and compositing it into the bottom position, aligned so its bar and wall-border line up with the bottom gate's own existing boundaries - with a short edge feather so the seam doesn't show. This guarantees the bottom gate exactly matches the top gate's real design (plain flat posts, no gray cap, no duplicate) instead of relying on a guessed reconstruction. Verified live on both floors - no doubled posts, digit unaffected, no seam visible at the patch edges.
+
+**Caught a second artifact from that same mirror fix**: the top-gate template region I copied also happened to include the top end of a real parking-row divider bar that normally only exists near the top gate - pasting it onto the bottom introduced a floating gray bar in open asphalt that doesn't belong there (confirmed against floor 1, which has no such bar in that spot). Fixed by erasing just that stray bar back to flat local asphalt (sampled from clean background a short distance away, same tiling-plus-feather technique used elsewhere in this file), leaving the already-fixed posts untouched. Re-verified live on both floors - bottom gate on floor 2 and floor 3 now matches floor 1's bottom gate exactly, nothing floating in the asphalt.
+
+### Round 13 second follow-up: the original digit-line fix had left a smaller, still-visible seam
+
+You flagged that the faint line was still there, in the digit itself this time (zoomed screenshot showed a clear gray smear cutting across the bottom-right foot of the "2"). Measured it directly in the pixel data: a 5-6px-wide band sitting at roughly half brightness between white and background, not a normal 1-2px antialiasing edge - a genuine leftover from the very first digit-line fix a few rounds back, just smaller and easier to miss than the original line.
+
+Rather than patch this by hand a third time, redid the digit properly: composited the actual digit ink straight from your original per-floor upload (the untouched source image, never passed through any of my previous edits) onto the current floor-2.png/floor-3.png, using each pixel's own brightness in that source as its blend weight - so only real ink pixels move across, and the existing background (dot texture, PWD badges, gate, everything else already fixed this round) is left completely alone. Checked the floor's other digit (the one near the top gate) for the same issue first and confirmed it was never touched by the earlier fix, so only the bottom one needed this. Verified live in the actual running app (not just file crops) on both floors - the seam is gone, gate and badges from earlier in this round are unaffected.
+
+### Round 13 third follow-up: floor 2 replaced wholesale with a fresh, clean template
+
+After multiple patch attempts on floor-2.png kept surfacing one more small leftover issue each time, you provided a brand new, clean floor-2 background (exact same 1920x1080 canvas and layout as the other floors, no editing history attached). Used it as-is rather than trying to patch the old file again, per how "use this as the template" is meant to be read on this project - a direct swap, not a reinterpretation.
+
+The new template doesn't have a floor-number digit baked in (floors 1 and 3 do), so the "2" was composited onto it at both corners, sourced from the already-clean digit ink fixed earlier this round, positioned to match floor 1's exact digit coordinates (confirmed the new template lines up pixel-for-pixel with floor 1 everywhere else - gate, dividers, stairs icon - so floor 1's digit position is the correct reference, not floor 2's old, slightly-offset one). `database` and `ParkingFloorMap.tsx` are unchanged - only `floor-2.png` itself was replaced.
+
+Verified live: both digits render cleanly with no seam at any zoom level tested, PWD badges/arrows/stairs icon all in place, and clicking a stall (tested 2-5) correctly opens "2A5 Details" - confirming the hand-marked click-zone coordinates still line up with the new background.
+
+### Round 13 fourth follow-up: the bottom digit specifically was the problem, not the general approach
+
+Still showing on your end even on the brand-new template, so we isolated it properly instead of guessing again: covered the whole floor-2 image with solid gray (confirmed the artifact disappeared, as expected with nothing there), then restored the real image (confirmed it came back), then removed just the bottom-left digit and left everything else in place (confirmed it was gone). That narrowed it down to something specific about that one digit instance - not the gate, not the background, not the general compositing approach, since the top digit (built the exact same way) never showed it.
+
+Fixed by not regenerating the bottom digit at all - duplicated the pixels of the top digit (the one that's never had the issue) straight down to the bottom position, using the same brightness-weighted ink transfer as before so only the glyph itself moves, not any surrounding background. Both "2"s on floor 2 are now pixel-identical copies of the same source. Verified live via the raw image endpoint - clean, no seam, matches the top digit exactly.
+
+## Round 14: floor switching flashed white
+
+Switching floors (on both Live Occupancy and Slot Assignment) briefly flashed white before the new floor's map appeared - uncomfortable to look at repeatedly.
+
+Root cause: both pages wrapped the map in `<div key={floor} className={...animate-floor-up/down}>`. Changing `key` on floor change forces React to fully unmount the old map (including the `<img>`) and mount a brand new one, instead of just updating its props in place - so the old image disappears instantly while the new one fades in from `opacity: 0` over 0.3s, and the page's white background shows through for that gap. This is the same category of issue as the scroll-jump bug from earlier this round, just a different symptom of forcing a full remount on every floor switch.
+
+Removed the `key={floor}` wrapper and the slide-fade animation (`animate-floor-up`/`animate-floor-down` and their keyframes in `index.css`) from both `LiveOccupancyDashboard.tsx` and `SlotAssignment.tsx`, along with the now-unused `floorDirection` state that only fed that animation. The map's own `<img>` element now stays mounted across floor changes and just gets a new `src`, so the browser swaps directly to the new floor with nothing blank in between. Verified live on both pages - floor switching is now an instant, direct swap, no flash.
+
+## Round 15: floor-3's digit sat in a different spot than floor-1/floor-2, and a stuck "selected" underline
+
+**Digit position mismatch**: floor-1 and the rebuilt floor-2 both place their "3"/"2" digit at the same pixel position (y134-193, x311-353 for the top one), but floor-3's digit sat about 8px to the right and 9px higher at the top corner (1px higher at the bottom corner) - never corrected when floor-2 got realigned to floor-1's coordinates a few rounds back, since floor-3 wasn't part of that fix.
+
+Fixed by compositing floor-3's own digit ink (unchanged - just the position was off, not the shape) onto the correct, floor-1-matching coordinates, using the same brightness-weighted ink transfer as the floor-2 work, with the old position's background cleaned up first. First attempt accidentally pulled a nearby wall divider into the erase/sample area (same category of mistake as the earlier gate fix) - caught it by checking the result before deploying, and redid it with a verified-clean sample strip instead. Checked purely from the asset files and pixel data, no browser needed for this one. Both digits on floor 3 now land on the exact same coordinates as floor 1 and floor 2.
+
+**Stuck underline on a previously-viewed slot**: on Live Occupancy, closing a slot's detail drawer (the X button, or the auto-close after resolving an alert) only hid the drawer - it never cleared `selectedSlot`, so the "selected" underline under that slot's label (added in Round 12 when the rectangle badge was dropped) stayed stuck on whichever slot was last viewed, indefinitely, even with the drawer closed. `SlotAssignment.tsx`'s equivalent panel already cleared its selection correctly on close - only `LiveOccupancyDashboard.tsx` had the gap. Fixed by clearing `selectedSlot` alongside hiding the drawer.
+
+## Round 16: removed the "PWD Slots Only" filter from Slot Assignment
+
+Dropped per your call - it wasn't reliably showing the right slots, and it's redundant now anyway since every PWD stall already has its own blue wheelchair badge baked right into the map art (Round 11), so there's no real need to filter them out separately. Removed the checkbox, the `filterPwd` state, and the `Filter` icon import that only existed for it; `Refresh` stays as its own control in that card. The slot list and map both go back to showing every slot unfiltered, same as before any PWD filter existed.
+
+Also removed the separate "PWD Slot" checkbox from the "Manage Slot" modal (opens when you click a slot on the map) for the same reason - `is_pwd` isn't something that needs editing per-slot from here anymore. The modal still saves the slot's existing PWD status along with whatever else changes (status), it just doesn't offer a way to flip it from this screen.
+
+## Round 17: removed the "Manage Slots" shortcut button
+
+Flagged as confusing, and rightly so: next to the floor switcher there was a "Manage Slots" button that didn't actually let you pick a slot - it just grabbed whichever slot sorted first alphabetically by slot_code on the current floor and opened the single-slot edit modal for that one, with no indication to the admin which slot they'd land on. Clicking any stall directly on the map already opens that exact same modal for the slot you actually meant to edit, so this was a redundant, confusing shortcut rather than a real feature.
+
+This is unrelated to reassigning a reservation to a different slot - that's a separate flow entirely, driven by each reservation's own "Reassign" button in the list below and its own modal. Removed just the button (and the now-unused `Settings` icon import); clicking a slot on the map still opens the same Manage Slot modal as before, and reassigning reservations is untouched.
+
+## Round 18: login after account creation failing silently with the wrong reason shown
+
+Traced from "I created an account and couldn't log in" - a live Supabase project requires the new user to confirm their email before they can sign in at all (this repo's `supabase/config.toml` has confirmations off, but that file only governs a local `supabase start` instance, not your actual hosted project). Since Account Creation's "welcome email with the temporary password" is aspirational only (see below), there was no way to find that out - the login screen just said "Incorrect email or password" no matter what the real reason was, because `Login.tsx` flattened every login error into that one generic message. Fixed to detect Supabase's "Email not confirmed" error specifically and show the real reason instead ("Please confirm your email before logging in..."), and to not count that toward the failed-attempt lockout, since it isn't a wrong-password situation. Immediate unblock for any account already stuck like this: Supabase Dashboard -> Authentication -> Users -> that user -> manually confirm their email.
+
+Also flagged while investigating: Account Creation's password field is labeled "Temporary Password" with a note promising the user "will receive a welcome email with their temporary password" and "will be required to change their password upon first login" - neither half of that is actually implemented. No custom email is sent (only Supabase's default confirmation email, which doesn't contain the password), and nothing anywhere reads the `force_password_change` flag that gets stamped on signup to actually force a change. Left as-is for now since it's a bigger feature (the email part needs a Supabase Edge Function with a service-role key, same pattern as Round 5's Reset Password fix) - noted here so it doesn't get mistaken for working.
+
+## ⚠️ Action required on the live Supabase project (this round)
+
+Run `database/rls_policies.sql` again in the Supabase SQL Editor (safe to re-run, same as always) - it adds one new policy described below that staff account creation and customer signup both now depend on.
+
+## Round 19: accounts created through the app never actually got a working login - found while chasing the account creation issue above
+
+Digging into why `marga@gmail.com` couldn't log in even after fixing the email-confirmation issue turned up something much bigger. Every comment in this codebase ("Wait for profile to be created by trigger", "Database trigger handle_new_user() will create the profile with role='customer'") assumes a database trigger creates each new user's `profiles` row automatically. Checked the live project directly:
+
+```sql
+select pg_get_functiondef(oid) from pg_proc where proname = 'handle_new_user';
+```
+
+Zero rows. That function doesn't exist. Never did, as far as either of us could tell. So every account ever created through either signup path - desktop's Account Creation form, and the mobile app's customer self-registration (`shared/src/auth.ts`) - has only ever gotten a real `auth.users` login with **zero matching `profiles` row**. The desktop flow's `.update()` afterward silently touched 0 rows (Supabase doesn't error on that), and the mobile flow never even attempted an insert. Confirmed directly against `marga@gmail.com`: a real row in `auth.users`, `NULL` everywhere when joined to `profiles`. That's exactly the "Access Denied / customers should use the mobile app" screen, for a completely different reason than it looks like - not an actual customer, just nobody there at all.
+
+Fixed both signup paths to insert the `profiles` row themselves instead of waiting on a trigger that was never there:
+
+- **`AccountCreation.tsx`**: the tricky part here is *session*, not just the missing insert - `signUp()` immediately swaps the browser's active session to the brand-new user (there's no service-role key available client-side to avoid this), and the existing RLS policy only allows an **admin's own session** to insert a profiles row. So the admin's session now has to be restored *before* the insert runs, not after like the old code did - reordered that, then insert the full profile (name, email, role, status) as the now-restored admin. If the insert itself still fails for some reason, that's now surfaced as a real error message instead of silently leaving a stranded account.
+- **`shared/src/auth.ts`** (used by the mobile app): a self-registering customer has no admin session to borrow - they need to be able to insert their *own* row. There was no RLS policy allowing that at all, so added one: `"Users can insert own profile" FOR INSERT WITH CHECK (auth.uid() = id AND role = 'customer')` - deliberately pinned to `role = 'customer'` only, so a self-signup can never insert itself as staff. Then inserted the profile right after `signUp()` succeeds, same shape as the desktop fix.
+
+**Known remaining gap, flagged but not fixed here**: `signUp()` only hands back an active session immediately if email confirmation is off project-wide. If it's on, there's no session yet at the moment of signup, so a customer's own self-insert has nothing to authenticate as and would silently fail the same way the old code did - just for a new reason. The real fix for that case is creating the profile lazily on first login instead of at signup time (check-then-insert in the login flow), which hasn't been built. Worth doing if customer self-signup keeps misbehaving even after this round.
+
+**For any accounts already stranded by this** (created before this fix, like `marga@gmail.com` was): find them with the same query used to diagnose this -
+
+```sql
+select au.id, au.email, p.id as profile_id
+from auth.users au
+left join profiles p on p.id = au.id
+where p.id is null
+order by au.created_at desc;
+```
+
+- then insert a matching `profiles` row by hand for each one (full_name, email, phone, role, status at minimum), same as was done for `marga@gmail.com` this round.
+
+## Round 20: couldn't delete a walk-in customer with no reservation history
+
+### ⚠️ Action required - redeploy the Edge Function
+
+```
+npx supabase functions deploy admin-user-actions
+```
+
+Same one-time deploy pattern as Round 5 - if you're already linked to the project (you should be, from back then), this is the only command needed.
+
+Deleting "Na" (a walk-in customer from Manual Entry testing, zero reservations) from User Management looked like it just silently did nothing - the confirm modal flashed "Deleting..." then reset back to showing the delete button again, no visible error, because the real error message renders near the top of the page and the modal (which correctly stays open on failure) was covering it the whole time. Underneath, it said **"User not found."**
+
+Root cause is in the `admin-user-actions` Edge Function, not the page: hard-deleting a user calls `adminClient.auth.admin.deleteUser(targetUserId)`, which assumes every `profiles` row has a matching `auth.users` login. Walk-in customers never get one - `schema.sql` says so directly: a walk-in's `profiles.id` is just an auto-generated UUID with no matching auth account, by design, since they never log in. So deleting any walk-in with no reservation history (the only case that reaches the hard-delete path at all) was guaranteed to hit Supabase's Auth API asking it to delete a login that was never there, and get "User not found" back every single time.
+
+Fixed by treating that specific error as the expected no-op it actually is for a walk-in, instead of a failure - any other error still fails the request normally. The client's own follow-up `profiles` row delete (which doesn't need the service-role key) was always going to be the part that actually removes a walk-in; now it gets the chance to run instead of being blocked by an auth-delete call that could never succeed for this case.
+
+Left for a future round, not fixed here: the error banner rendering behind the still-open delete modal is its own small bug worth cleaning up, so a real failure (on a user that *does* have an auth account) doesn't look like silent nothing happening the same way this one did.
+
+## Round 21: Account Creation's email field never actually used the trimmed value
+
+Chasing a persistent "Email address ... is invalid" rejection from Supabase on an address that looked completely normal turned up a real gap: `validateForm()` checked `email.trim()` for emptiness, but then ran the actual format regex - and everything downstream, including what gets sent to `signUp()` - against the raw, untrimmed field value. Ordinary leading/trailing spaces would still get caught by the regex itself, but an invisible/zero-width character (the kind that can survive copy-pasting an address across several different apps, which this one had been all night) isn't matched by `\s` and could slide straight through the app's own check while still getting correctly rejected by Supabase's stricter server-side validation - looking identical on screen the whole time.
+
+Switched every use of the email field in this file to `email.trim().toLowerCase()` - the duplicate-email lookup, the regex check, the `signUp()` call, and the profile insert - so they all agree on the same value. Worth being upfront about the limit here: `.trim()` only strips ordinary whitespace, not every kind of invisible Unicode character, so this closes the most common version of the problem without being a guaranteed fix for every possible hidden-character case.
+
+## Round 22: typed form content no longer disappears on an accidental page refresh
+
+Requested system-wide, not for one specific page - a refresh mid-entry was wiping out whatever was already typed, same as a browser tab closing with unsaved work.
+
+New shared piece: `desktop/src/hooks/usePersistedState.ts` - a drop-in replacement for `useState` that also mirrors its value into `sessionStorage` (not `localStorage` - it only needs to survive a refresh of the same tab, not linger indefinitely once the tab is actually closed) and rehydrates from there on mount. Each field gets its own namespaced key (`parkwise:draft:<page>:<field>`) so nothing collides between pages.
+
+Applied it to every genuinely typed field across the app where losing it would actually cost someone real work:
+- **Account Creation**: full name, email, role
+- **Manual Entry**: plate number, customer name/phone, selected slot, duration, PWD checkbox
+- **Plate Verification**: search box, override reason, flag reason
+- **Time & Payment Log**: search box, date range, the annotation note text
+- **User Management**: search box, the edit-user form, penalty reason/amount
+- **Cash Payment**: amount received
+- **Reports**: the date range filter
+- **Live Occupancy**: search box
+
+Deliberately **not** applied to password fields anywhere (the hook's own comment says why - plain-text `sessionStorage` isn't somewhere a password, even a half-typed one, should sit even temporarily) - Account Creation's password, User Management's "new password" field, and the login form were all left as plain `useState`.
+
+Also skipped two kinds of state on purpose, since persisting them wouldn't actually do anything useful: pages where a form field gets overwritten by a fresh database fetch on every mount (Rates & Pricing's rate inputs - the fetch-on-load would just stomp over any restored draft immediately, making the persistence pointless without a real draft-vs-live-data reconciliation step this didn't seem worth building tonight), and state that only exists inside a modal that itself resets to closed on refresh (Live Occupancy's alert-resolution note - restoring the text wouldn't matter if the modal holding it isn't open to show it). Slot Assignment and the Login page were left alone too - no free-text field there where losing a few typed characters costs anything beyond retyping a short value.
+
+## Round 23: dollar signs instead of pesos in Cash Payment, Reports, and Time & Payment Log
+
+Rates & Pricing and User Management already used ₱ everywhere - those two were fine. Swept the rest of the app for every other spot showing a `$` and fixed all of them: Cash Payment's itemized receipt breakdown, the amount-received input's currency prefix, the change display, and the validation messages; Reports' penalty/revenue summary cards; Time & Payment Log's table columns and the entry detail panel.
+
+One deliberate exception: the actual PDF receipts generated by `jsPDF` (in both Cash Payment and Reports) use the literal text "PHP" instead of the ₱ symbol. jsPDF's default fonts (Helvetica/Times/Courier) use WinAnsiEncoding, which doesn't include the peso sign glyph at all - putting ₱ directly into a `doc.text()` call would render as a blank or missing character in the actual downloaded PDF, even though the exact same symbol displays fine in the on-screen React UI (ordinary browser text rendering doesn't have that limitation). CSV exports in both files were already symbol-free (plain numbers), which is the right call for spreadsheet compatibility - left those as-is.

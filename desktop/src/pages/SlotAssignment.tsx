@@ -7,7 +7,7 @@ import ParkingFloorMap from '../components/ParkingFloorMap';
 import FloorSwitcher from '../components/FloorSwitcher';
 import {
   MapPin, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
-  RefreshCw, Settings, Filter, Clock, User, Car
+  RefreshCw, Clock, User, Car
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
@@ -33,17 +33,14 @@ export default function SlotAssignment() {
   const [success, setSuccess] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [filterPwd, setFilterPwd] = useState(false);
   const [selectedReservation, setSelectedReservation] = useState<ReservationWithDetails | null>(null);
   const [newSlotId, setNewSlotId] = useState('');
   const [showReassignModal, setShowReassignModal] = useState(false);
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
   const [showSlotSettings, setShowSlotSettings] = useState(false);
   const [floor, setFloor] = useState(1);
-  const [floorDirection, setFloorDirection] = useState<'up' | 'down'>('up');
 
   const handleFloorChange = (newFloor: number) => {
-    setFloorDirection(newFloor > floor ? 'up' : 'down');
     setFloor(newFloor);
   };
 
@@ -287,8 +284,7 @@ export default function SlotAssignment() {
     setShowLogoutModal(false);
   };
 
-  const filteredSlots = filterPwd ? slots.filter(s => s.is_pwd) : slots;
-  const availableSlots = filteredSlots.filter(s => s.status === 'available');
+  const availableSlots = slots.filter(s => s.status === 'available');
   const totalFloors = slots.reduce((max, s) => Math.max(max, s.floor), 1);
 
   return (
@@ -340,24 +336,8 @@ export default function SlotAssignment() {
           </div>
         )}
 
-        {/* Filters */}
         <div className="card mb-6">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Filter size={18} className="text-gray-500" />
-                <span className="text-sm font-medium text-gray-700">Filter:</span>
-              </div>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={filterPwd}
-                  onChange={(e) => setFilterPwd(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-700">PWD Slots Only</span>
-              </label>
-            </div>
+          <div className="flex items-center justify-end">
             <button
               onClick={loadData}
               className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
@@ -372,28 +352,11 @@ export default function SlotAssignment() {
         <div className="card mb-6">
           <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
             <h2 className="text-lg font-semibold text-gray-900">Slot Map</h2>
-            <div className="flex items-center gap-3">
-              <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
-              {isAdmin && (
-                <button
-                  onClick={() => {
-                    const onThisFloor = filteredSlots.filter(s => s.floor === floor);
-                    if (onThisFloor.length > 0) {
-                      setEditingSlot(onThisFloor[0]);
-                      setShowSlotSettings(true);
-                    }
-                  }}
-                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-primary"
-                >
-                  <Settings size={16} />
-                  Manage Slots
-                </button>
-              )}
-            </div>
+            <FloorSwitcher floor={floor} totalFloors={totalFloors} onChange={handleFloorChange} />
           </div>
-          <div key={floor} className={floorDirection === 'up' ? 'animate-floor-up' : 'animate-floor-down'}>
+          <div>
             <ParkingFloorMap
-              slots={filteredSlots}
+              slots={slots}
               floor={floor}
               selectedSlotId={editingSlot?.id}
               onSlotClick={(slot) => {
@@ -559,17 +522,6 @@ export default function SlotAssignment() {
                   <option value="occupied">Occupied</option>
                   <option value="maintenance">Maintenance</option>
                 </select>
-              </div>
-              <div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={editingSlot.is_pwd}
-                    onChange={(e) => setEditingSlot({ ...editingSlot, is_pwd: e.target.checked })}
-                    className="rounded"
-                  />
-                  <span className="text-sm text-gray-700">PWD Slot</span>
-                </label>
               </div>
             </div>
             <div className="flex gap-3 mt-6">

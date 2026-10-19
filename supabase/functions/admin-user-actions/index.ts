@@ -96,7 +96,14 @@ Deno.serve(async (req) => {
       if (error) throw error;
     } else {
       const { error } = await adminClient.auth.admin.deleteUser(targetUserId);
-      if (error) throw error;
+      // Walk-in customers (Manual Entry) never get a real login in the
+      // first place - profiles.id for one is just an auto-generated UUID
+      // with no matching auth.users row by design (see schema.sql). That
+      // makes "user not found" here an expected no-op, not a failure: there
+      // was never an auth account to delete, so the caller's follow-up
+      // profiles row delete is the only part that actually needs to happen.
+      // Any other error is real and should still fail the request.
+      if (error && !/user not found/i.test(error.message)) throw error;
     }
 
     return json({ success: true });

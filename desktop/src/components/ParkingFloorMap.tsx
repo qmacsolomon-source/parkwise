@@ -11,8 +11,12 @@ interface ParkingFloorMapProps {
   getSlotTitle?: (slot: Slot) => string | undefined;
 }
 
+// Used as the label's own text color now that there's no filled badge
+// behind it - "available" needs to read as near-white against the gray
+// asphalt art, where the muted gray used for its old badge fill would be
+// almost invisible as plain text.
 const STATUS_COLORS: Record<string, string> = {
-  available: '#9ca3af',
+  available: '#f1f5f9',
   reserved: '#f59e0b',
   occupied: '#22c55e',
   unverified: '#ef4444',
@@ -21,49 +25,107 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 // Every image is a 1920x1080 export of one floor's actual reference
-// drawing, used as-is for the background - this is the floor, not a
-// redraw of it. Everything below is a set of click-zone coordinates
-// measured directly off each image's pixels (divider positions, tick
-// centers, side-column spacing), expressed as % of the 1920x1080 canvas
-// so they stay aligned regardless of the displayed size.
+// drawing, used as-is for the background. The click-zone boxes below were
+// hand-drawn directly over the real floor-1 image (one box per real stall,
+// via the coordinate-picker tool) rather than estimated from the artwork -
+// floors 2 and 3 reuse the exact same box layout on top of their own
+// images, since the three floors are the same physical layout and hand-
+// marking each one separately isn't worth repeating.
 const IMAGE_W = 1920;
 const IMAGE_H = 1080;
 
-interface FloorLayout {
-  image: string;
-  topRowY: [number, number];
-  bottomRowY: [number, number];
-  bayCentersX: number[]; // 12 main-row stall centers, shared by top and bottom rows
-  sideX: [number, number];
-  sideCentersY: number[]; // 10 side-column stall centers
+const FLOOR_IMAGES: Record<number, string> = {
+  1: floor1Image,
+  2: floor2Image,
+  3: floor3Image,
+};
+
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  pwd: boolean;
 }
 
-const FLOOR_LAYOUTS: Record<number, FloorLayout> = {
-  1: {
-    image: floor1Image,
-    topRowY: [375, 565],
-    bottomRowY: [693, 883],
-    bayCentersX: [475, 547, 623, 698, 774, 849, 925, 1001, 1076, 1152, 1227, 1301],
-    sideX: [1536, 1660],
-    sideCentersY: [273, 348, 424, 499, 575, 651, 726, 802, 877, 953],
-  },
-  2: {
-    image: floor2Image,
-    topRowY: [378, 565],
-    bottomRowY: [690, 877],
-    bayCentersX: [482, 553, 628, 702, 777, 851, 925, 1000, 1074, 1148, 1223, 1295],
-    sideX: [1527, 1654],
-    sideCentersY: [277, 351, 426, 500, 574, 649, 723, 798, 872, 946],
-  },
-  3: {
-    image: floor3Image,
-    topRowY: [380, 565],
-    bottomRowY: [689, 874],
-    bayCentersX: [487, 557, 631, 704, 778, 851, 925, 999, 1072, 1146, 1219, 1291],
-    sideX: [1521, 1649],
-    sideCentersY: [280, 354, 427, 501, 575, 648, 722, 796, 869, 943],
-  },
-};
+// 60 stalls, 5 rows of 12 (reading order matches zone_col 1-60 on the
+// 'block_a' zone).
+const MAIN_BOXES: Box[] = [
+  { x: 440, y: 91, w: 63, h: 134, pwd: false },
+  { x: 518, y: 92, w: 63, h: 134, pwd: false },
+  { x: 591, y: 90, w: 63, h: 134, pwd: false },
+  { x: 668, y: 91, w: 63, h: 134, pwd: false },
+  { x: 744, y: 91, w: 63, h: 134, pwd: false },
+  { x: 819, y: 92, w: 63, h: 134, pwd: false },
+  { x: 892, y: 92, w: 63, h: 134, pwd: false },
+  { x: 970, y: 92, w: 63, h: 134, pwd: true },
+  { x: 1044, y: 90, w: 63, h: 134, pwd: true },
+  { x: 1121, y: 91, w: 63, h: 134, pwd: true },
+  { x: 1196, y: 91, w: 63, h: 134, pwd: true },
+  { x: 1272, y: 92, w: 63, h: 134, pwd: true },
+  { x: 439, y: 331, w: 63, h: 134, pwd: false },
+  { x: 517, y: 332, w: 63, h: 134, pwd: false },
+  { x: 590, y: 329, w: 63, h: 134, pwd: false },
+  { x: 668, y: 330, w: 63, h: 134, pwd: false },
+  { x: 743, y: 330, w: 63, h: 134, pwd: false },
+  { x: 819, y: 331, w: 63, h: 134, pwd: false },
+  { x: 892, y: 331, w: 63, h: 134, pwd: false },
+  { x: 970, y: 332, w: 63, h: 134, pwd: false },
+  { x: 1043, y: 329, w: 63, h: 134, pwd: false },
+  { x: 1120, y: 331, w: 63, h: 134, pwd: false },
+  { x: 1196, y: 331, w: 63, h: 134, pwd: false },
+  { x: 1271, y: 331, w: 63, h: 134, pwd: false },
+  { x: 441, y: 477, w: 63, h: 134, pwd: false },
+  { x: 519, y: 478, w: 63, h: 134, pwd: false },
+  { x: 592, y: 475, w: 63, h: 134, pwd: false },
+  { x: 669, y: 476, w: 63, h: 134, pwd: false },
+  { x: 745, y: 476, w: 63, h: 134, pwd: false },
+  { x: 820, y: 477, w: 63, h: 134, pwd: false },
+  { x: 893, y: 477, w: 63, h: 134, pwd: false },
+  { x: 971, y: 478, w: 63, h: 134, pwd: false },
+  { x: 1045, y: 476, w: 63, h: 134, pwd: false },
+  { x: 1122, y: 477, w: 63, h: 134, pwd: false },
+  { x: 1197, y: 477, w: 63, h: 134, pwd: false },
+  { x: 1273, y: 477, w: 63, h: 134, pwd: false },
+  { x: 442, y: 648, w: 63, h: 134, pwd: false },
+  { x: 517, y: 648, w: 63, h: 134, pwd: false },
+  { x: 590, y: 646, w: 63, h: 134, pwd: false },
+  { x: 668, y: 647, w: 63, h: 134, pwd: false },
+  { x: 743, y: 647, w: 63, h: 134, pwd: false },
+  { x: 819, y: 648, w: 63, h: 134, pwd: false },
+  { x: 892, y: 648, w: 63, h: 134, pwd: false },
+  { x: 970, y: 649, w: 63, h: 134, pwd: false },
+  { x: 1043, y: 646, w: 63, h: 134, pwd: false },
+  { x: 1120, y: 647, w: 63, h: 134, pwd: false },
+  { x: 1196, y: 647, w: 63, h: 134, pwd: false },
+  { x: 1271, y: 648, w: 63, h: 134, pwd: false },
+  { x: 444, y: 794, w: 63, h: 134, pwd: false },
+  { x: 519, y: 795, w: 63, h: 134, pwd: false },
+  { x: 592, y: 792, w: 63, h: 134, pwd: false },
+  { x: 669, y: 793, w: 63, h: 134, pwd: false },
+  { x: 745, y: 793, w: 63, h: 134, pwd: false },
+  { x: 820, y: 794, w: 63, h: 134, pwd: false },
+  { x: 893, y: 794, w: 63, h: 134, pwd: false },
+  { x: 971, y: 795, w: 63, h: 134, pwd: false },
+  { x: 1045, y: 793, w: 63, h: 134, pwd: false },
+  { x: 1122, y: 794, w: 63, h: 134, pwd: false },
+  { x: 1197, y: 794, w: 63, h: 134, pwd: false },
+  { x: 1273, y: 794, w: 63, h: 134, pwd: false },
+];
+
+// 9 stalls along the far wall (reading order matches zone_col 1-9 on the
+// 'side' zone).
+const SIDE_BOXES: Box[] = [
+  { x: 1506, y: 275, w: 192, h: 72, pwd: true },
+  { x: 1507, y: 351, w: 192, h: 72, pwd: true },
+  { x: 1507, y: 428, w: 192, h: 72, pwd: true },
+  { x: 1505, y: 503, w: 192, h: 72, pwd: true },
+  { x: 1506, y: 579, w: 192, h: 72, pwd: true },
+  { x: 1506, y: 652, w: 192, h: 72, pwd: false },
+  { x: 1507, y: 729, w: 192, h: 72, pwd: false },
+  { x: 1506, y: 806, w: 192, h: 72, pwd: false },
+  { x: 1505, y: 881, w: 192, h: 72, pwd: false },
+];
 
 const pct = (v: number, total: number) => `${(v / total) * 100}%`;
 
@@ -72,19 +134,15 @@ function Marker({
   isSelected,
   onClick,
   title,
-  left,
-  top,
-  width,
-  height,
+  box,
+  label,
 }: {
   slot: Slot;
   isSelected: boolean;
   onClick: () => void;
   title?: string;
-  left: string;
-  top: string;
-  width: string;
-  height: string;
+  box: Box;
+  label: string;
 }) {
   const color = STATUS_COLORS[slot.status] || STATUS_COLORS.available;
 
@@ -95,14 +153,27 @@ function Marker({
       title={title || slot.slot_code}
       aria-label={`Slot ${slot.slot_code}, ${slot.status}${slot.is_pwd ? ', PWD' : ''}`}
       className="absolute flex items-center justify-center group"
-      style={{ left, top, width, height }}
+      style={{
+        left: pct(box.x, IMAGE_W),
+        top: pct(box.y, IMAGE_H),
+        width: pct(box.w, IMAGE_W),
+        height: pct(box.h, IMAGE_H),
+        outline: 'none',
+        boxShadow: 'none',
+        WebkitTapHighlightColor: 'transparent',
+      }}
     >
       <span
-        className={`block w-[55%] h-[55%] rounded-full transition-transform group-hover:scale-125 ${
-          isSelected ? 'ring-2 ring-primary ring-offset-1' : ''
-        } ${slot.is_pwd ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
-        style={{ backgroundColor: color, opacity: slot.status === 'available' ? 0.45 : 0.9 }}
-      />
+        className={`text-[10px] font-semibold leading-none whitespace-nowrap transition-transform group-hover:scale-110 ${
+          isSelected ? 'underline decoration-2 underline-offset-2 scale-110' : ''
+        }`}
+        style={{
+          color,
+          textShadow: '0 1px 2px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.6)',
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }
@@ -114,17 +185,14 @@ export default function ParkingFloorMap({
   selectedSlotId,
   getSlotTitle,
 }: ParkingFloorMapProps) {
-  const layout = FLOOR_LAYOUTS[floor] || FLOOR_LAYOUTS[1];
+  const image = FLOOR_IMAGES[floor] || FLOOR_IMAGES[1];
   const floorSlots = slots.filter((s) => s.floor === floor);
 
-  const byZone = (zone: string, row?: 'top' | 'bottom') =>
-    floorSlots
-      .filter((s) => s.zone === zone && (row ? s.zone_row === row : true))
-      .sort((a, b) => a.zone_col - b.zone_col);
+  const byZone = (zone: string) =>
+    floorSlots.filter((s) => s.zone === zone).sort((a, b) => a.zone_col - b.zone_col);
 
-  const topRow = byZone('block_a', 'top');
-  const bottomRow = byZone('block_a', 'bottom');
-  const side = byZone('side');
+  const mainSlots = byZone('block_a');
+  const sideSlots = byZone('side');
 
   if (floorSlots.length === 0) {
     return (
@@ -134,52 +202,40 @@ export default function ParkingFloorMap({
     );
   }
 
-  const bayWidth = 60; // px at native 1920 resolution
-  const sideHeight = 50;
-
-  const renderRow = (row: Slot[], yRange: [number, number]) =>
-    row.map((slot, i) => {
-      const cx = layout.bayCentersX[i];
-      if (cx === undefined) return null;
-      return (
-        <Marker
-          key={slot.id}
-          slot={slot}
-          isSelected={slot.id === selectedSlotId}
-          onClick={() => onSlotClick(slot)}
-          title={getSlotTitle?.(slot)}
-          left={pct(cx - bayWidth / 2, IMAGE_W)}
-          top={pct(yRange[0], IMAGE_H)}
-          width={pct(bayWidth, IMAGE_W)}
-          height={pct(yRange[1] - yRange[0], IMAGE_H)}
-        />
-      );
-    });
+  // Plain "floor-spot" label (1-1, 1-2, ... 1-69) instead of the real slot
+  // code (1A1, 1S4, ...) - a simpler number an attendant can read at a
+  // glance on the map, one continuous sequence across the main block then
+  // the side column. Offset by the fixed box-list length (not the live
+  // slot count), so the numbering stays stable even while data is still
+  // filling in.
+  const renderSlot = (slot: Slot, box: Box | undefined, spotNumber: number) => {
+    if (!box) return null;
+    return (
+      <Marker
+        key={slot.id}
+        slot={slot}
+        isSelected={slot.id === selectedSlotId}
+        onClick={() => onSlotClick(slot)}
+        title={getSlotTitle?.(slot)}
+        box={box}
+        label={`${floor}-${spotNumber}`}
+      />
+    );
+  };
 
   return (
     <div className="w-full max-w-[1600px] mx-auto">
       <div className="relative rounded-md overflow-hidden">
-        <img src={layout.image} alt={`Floor ${floor} layout`} className="block w-full h-auto select-none" draggable={false} />
-        <div className="absolute inset-0" style={{ aspectRatio: `${IMAGE_W} / ${IMAGE_H}` }}>
-          {renderRow(topRow, layout.topRowY)}
-          {renderRow(bottomRow, layout.bottomRowY)}
-          {side.map((slot, i) => {
-            const cy = layout.sideCentersY[i];
-            if (cy === undefined) return null;
-            return (
-              <Marker
-                key={slot.id}
-                slot={slot}
-                isSelected={slot.id === selectedSlotId}
-                onClick={() => onSlotClick(slot)}
-                title={getSlotTitle?.(slot)}
-                left={pct(layout.sideX[0], IMAGE_W)}
-                top={pct(cy - sideHeight / 2, IMAGE_H)}
-                width={pct(layout.sideX[1] - layout.sideX[0], IMAGE_W)}
-                height={pct(sideHeight, IMAGE_H)}
-              />
-            );
-          })}
+        <img
+          src={image}
+          alt={`Floor ${floor} layout`}
+          className="block w-full h-auto select-none"
+          style={{ aspectRatio: `${IMAGE_W} / ${IMAGE_H}` }}
+          draggable={false}
+        />
+        <div className="absolute inset-0">
+          {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i], i + 1))}
+          {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i], MAIN_BOXES.length + i + 1))}
         </div>
       </div>
     </div>

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
+import { usePersistedState } from '../hooks/usePersistedState';
 import {
   UserPlus, AlertTriangle, CheckCircle, LogOut,
   Eye, EyeOff, Shield, Volume2, VolumeX
@@ -8,9 +9,11 @@ import {
 
 export default function AccountCreation() {
   const { profile, logout } = useAuth();
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'attendant' | 'admin'>('attendant');
+  const [fullName, setFullName] = usePersistedState('account-creation:full-name', '');
+  const [email, setEmail] = usePersistedState('account-creation:email', '');
+  const [role, setRole] = usePersistedState<'attendant' | 'admin'>('account-creation:role', 'attendant');
+  // Password is intentionally plain useState, not persisted - see
+  // usePersistedState's own comment on why passwords are excluded.
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -49,8 +52,16 @@ export default function AccountCreation() {
       return false;
     }
 
+    // Trimmed, not the raw field value: ordinary leading/trailing spaces
+    // would already fail the regex below, but some invisible/zero-width
+    // characters (the kind that sneak in through copy-pasting an address
+    // across several different apps) aren't \s and can slip through this
+    // check while still getting rejected by Supabase's own, stricter
+    // validation - trimming here doesn't strip those, but keeping this
+    // value and the one actually submitted below in sync is still correct
+    // on its own.
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
+    if (!emailRegex.test(email.trim())) {
       setError('Invalid email format');
       return false;
     }
@@ -81,7 +92,7 @@ export default function AccountCreation() {
       const { data: existingEmail } = await supabase
         .from('profiles')
         .select('email')
-        .eq('email', email.toLowerCase())
+        .eq('email', email.trim().toLowerCase())
         .single();
 
       if (existingEmail) {
@@ -99,7 +110,7 @@ export default function AccountCreation() {
 
       // Create user using Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: email.toLowerCase(),
+        email: email.trim().toLowerCase(),
         password: password,
         options: {
           data: {
@@ -116,30 +127,48 @@ export default function AccountCreation() {
         return;
       }
 
-      // Wait for profile to be created by trigger
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Update profile with additional fields
-      if (authData.user) {
-        await supabase
-          .from('profiles')
-          .update({
-            full_name: fullName,
-            phone: '',
-            role: role,
-            status: 'active',
-            pwd_permit_number: null,
-            pwd_verified: false,
-          })
-          .eq('id', authData.user.id);
-      }
-
-      // Restore the admin's own session
+      // Restore the admin's own session before anything else. signUp() just
+      // swapped the active session to the brand-new user, and the profiles
+      // insert below is only allowed under RLS for an admin (or for the new
+      // user acting on their own row, which there's no policy for) - so this
+      // swap-back has to happen first, not after, or the insert gets
+      // silently rejected.
       if (adminSession.session) {
         await supabase.auth.setSession({
           access_token: adminSession.session.access_token,
           refresh_token: adminSession.session.refresh_token,
         });
+      }
+
+      // No database trigger creates a profiles row on signup - there isn't
+      // one in the live project (confirmed: pg_get_functiondef finds no
+      // handle_new_user() function at all), despite comments elsewhere in
+      // this codebase assuming there is. Every account created through this
+      // form before this fix ended up with a real auth.users login but zero
+      // matching profiles row - permanently "Access Denied" until someone
+      // noticed and patched it in by hand. Insert it ourselves instead of
+      // waiting on a trigger that was never actually there.
+      let profileError = null;
+      if (authData.user) {
+        const result = await supabase
+          .from('profiles')
+          .upsert({
+            id: authData.user.id,
+            full_name: fullName,
+            email: email.trim().toLowerCase(),
+            phone: '',
+            role: role,
+            status: 'active',
+            pwd_permit_number: null,
+            pwd_verified: false,
+          }, { onConflict: 'id' });
+        profileError = result.error;
+      }
+
+      if (profileError) {
+        setError(`Login was created, but the profile failed to save: ${profileError.message}. The account won't be able to sign in until this is fixed.`);
+        setLoading(false);
+        return;
       }
 
       // Log to audit_log
@@ -148,7 +177,7 @@ export default function AccountCreation() {
         action: 'account_created',
         details: {
           new_user_id: authData.user?.id,
-          email: email.toLowerCase(),
+          email: email.trim().toLowerCase(),
           full_name: fullName,
           role: role,
         },

@@ -48,6 +48,7 @@ $$;
 
 -- Step 2: Drop existing policies (safe to re-run)
 DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can insert own profile" ON profiles;
 DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
 DROP POLICY IF EXISTS "Attendants can view all profiles" ON profiles;
 DROP POLICY IF EXISTS "Admins can insert profiles" ON profiles;
@@ -105,6 +106,17 @@ DROP POLICY IF EXISTS "Attendants can update audit log entries" ON audit_log;
 -- Profiles policies
 CREATE POLICY "Users can view own profile" ON profiles
   FOR SELECT USING (auth.uid() = id);
+
+-- There is no database trigger creating a profiles row on signup (checked
+-- the live project directly - no handle_new_user() function exists, despite
+-- code comments elsewhere assuming there is). Both the mobile app's customer
+-- self-signup and desktop's staff Account Creation insert the row
+-- themselves instead; a self-registering customer has no staff session to
+-- fall back on, so they need to be able to insert their own row - but only
+-- ever as a customer, never any other role, or this would be a privilege
+-- escalation path.
+CREATE POLICY "Users can insert own profile" ON profiles
+  FOR INSERT WITH CHECK (auth.uid() = id AND role = 'customer');
 
 CREATE POLICY "Users can update own profile" ON profiles
   FOR UPDATE USING (auth.uid() = id);

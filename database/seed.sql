@@ -5,27 +5,31 @@
 -- first admin in Supabase Authentication > Users, then promote it with the
 -- promote-to-admin query in database/RUN_ORDER.md (step 5).
 
--- 3-floor parking map, 34 slots per floor (102 total), matching the
--- actual reference images (desktop/src/assets/floor-maps/floor-{n}.png)
--- pixel-for-pixel: one double-loaded aisle block ("block_a", 24 slots --
--- a top row and a bottom row of 12), and a single-file "side" column
--- along the far wall (10 slots). Top-row columns 11/12 (nearest the
--- elevator/stairs core drawn in the image) are PWD.
--- zone/zone_row/zone_col feed the visual layout only -- see schema.sql.
--- "compact" and "block_b" are no longer used (the schema's zone CHECK
--- still allows them for upgrade compatibility, but nothing seeds them).
+-- 3-floor parking map, 69 slots per floor (207 total), matching the
+-- click-zone boxes hand-marked directly over the real floor-1 reference
+-- image (desktop/src/assets/floor-maps/floor-{n}.png) -- one box per real
+-- stall, placed with the coordinate-picker tool rather than estimated.
+-- Floors 2 and 3 reuse the exact same box layout (same real-world garage,
+-- hand-marking each floor separately isn't worth repeating).
+-- "block_a" (60 slots: 5 rows of 12) is the main block; "side" (9 slots)
+-- is the single-file column along the far wall. zone_col is a flat
+-- reading-order index (1-60 / 1-9) that the frontend zips directly against
+-- its own fixed box-coordinate list -- see ParkingFloorMap.tsx.
+-- zone_row is unused (NULL) under this layout. "compact" and "block_b"
+-- are no longer used (the schema's zone CHECK still allows them for
+-- upgrade compatibility, but nothing seeds them).
 
--- Block A: {floor}A1..{floor}A24 (top row 1-12, bottom row 13-24)
+-- Block A: {floor}A1..{floor}A60. Columns 8-12 of each row of 12 are PWD
+-- (i.e. zone_col 8-12, 20-24, 32-36, 44-48, 56-60).
 INSERT INTO slots (slot_code, is_pwd, status, floor, zone, zone_row, zone_col)
-SELECT f::text || 'A' || ((r - 1) * 12 + c)::text, (r = 1 AND c IN (11, 12)), 'available', f, 'block_a',
-       CASE WHEN r = 1 THEN 'top' ELSE 'bottom' END, c
-FROM generate_series(1, 3) AS f, generate_series(1, 2) AS r, generate_series(1, 12) AS c
+SELECT f::text || 'A' || n::text, (((n - 1) % 12) + 1) IN (8, 9, 10, 11, 12), 'available', f, 'block_a', NULL, n
+FROM generate_series(1, 3) AS f, generate_series(1, 60) AS n
 ON CONFLICT (slot_code) DO NOTHING;
 
--- Side column: {floor}S1..{floor}S10
+-- Side column: {floor}S1..{floor}S9, columns 1-5 (nearest the elevator) are PWD.
 INSERT INTO slots (slot_code, is_pwd, status, floor, zone, zone_row, zone_col)
-SELECT f::text || 'S' || n::text, FALSE, 'available', f, 'side', NULL, n
-FROM generate_series(1, 3) AS f, generate_series(1, 10) AS n
+SELECT f::text || 'S' || n::text, n IN (1, 2, 3, 4, 5), 'available', f, 'side', NULL, n
+FROM generate_series(1, 3) AS f, generate_series(1, 9) AS n
 ON CONFLICT (slot_code) DO NOTHING;
 
 -- Default rates (only if the table is empty)
