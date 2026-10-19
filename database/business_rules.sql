@@ -37,7 +37,11 @@ DECLARE
   code_exists BOOLEAN;
 BEGIN
   LOOP
-    code := 'PW-' || upper(substring(encode(gen_random_bytes(4), 'hex'), 1, 8));
+    -- Built-in only: gen_random_uuid() lives in pg_catalog, so this keeps
+    -- working even when the caller pins search_path (SET search_path =
+    -- public). gen_random_bytes() came from the pgcrypto extension, which
+    -- nothing in this project creates.
+    code := 'PW-' || upper(substring(replace(gen_random_uuid()::text, '-', ''), 1, 8));
     SELECT EXISTS(SELECT 1 FROM reservations WHERE booking_code = code) INTO code_exists;
     IF NOT code_exists THEN
       RETURN code;

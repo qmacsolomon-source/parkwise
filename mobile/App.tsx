@@ -1,9 +1,18 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
+import { useFonts } from 'expo-font';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+} from '@expo-google-fonts/inter';
 import { AuthProvider, useAuth } from './src/contexts/AuthContext';
+import { AccessibilityProvider, useTheme } from './src/contexts/AccessibilityContext';
+import { ToastProvider } from './src/components/ui';
 import LoginScreen from './src/screens/LoginScreen';
 import RegistrationScreen from './src/screens/RegistrationScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -12,10 +21,14 @@ import TimerScreen from './src/screens/TimerScreen';
 import NotificationsScreen from './src/screens/NotificationsScreen';
 import HistoryScreen from './src/screens/HistoryScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
+import MyVehiclesScreen from './src/screens/MyVehiclesScreen';
 import HelpScreen from './src/screens/HelpScreen';
-import { SlotStatus, ReservationStatus } from '@parkwise/shared';
+import WayfindingScreen from './src/screens/WayfindingScreen';
 
 const Stack = createNativeStackNavigator();
+
+/** A phone is ~430 dp wide; browser previews are pinned to that. */
+const PHONE_MAX_WIDTH = 430;
 
 console.log('[startup] App module evaluated');
 
@@ -61,9 +74,11 @@ function AppRoutes() {
       <Stack.Screen name="Dashboard" component={DashboardScreen} />
       <Stack.Screen name="Reservation" component={ReservationScreen} />
       <Stack.Screen name="Timer" component={TimerScreen} />
+      <Stack.Screen name="Wayfinding" component={WayfindingScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="History" component={HistoryScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
       <Stack.Screen name="Help" component={HelpScreen} />
     </Stack.Navigator>
   );
@@ -108,17 +123,69 @@ class ErrorBoundary extends React.Component<
   }
 }
 
+/** How long the app waits for the bundled Inter files before giving up. */
+const FONT_TIMEOUT_MS = 4000;
+
+/**
+ * On the web the whole app is a phone-width column in the middle of the
+ * browser window, so a preview looks like the phone build. On device it is a
+ * pass-through and changes nothing.
+ */
+function AppFrame({ children }: { children: React.ReactNode }) {
+  const { colors } = useTheme();
+
+  if (Platform.OS !== 'web') return <>{children}</>;
+
+  return (
+    <View style={[styles.webOuter, { backgroundColor: colors.navyDeep }]}>
+      <View style={[styles.webInner, { backgroundColor: colors.background }]}>{children}</View>
+    </View>
+  );
+}
+
 export default function App() {
   console.log('[startup] app mounted');
 
+  const [fontsLoaded, fontError] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  });
+
+  // The font files are bundled in the app, so this is local and fast -- but a
+  // missing font must never be able to hold the app on the startup screen.
+  const [fontTimedOut, setFontTimedOut] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setFontTimedOut(true), FONT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const fontsReady = fontsLoaded || !!fontError || fontTimedOut;
+
+  if (!fontsReady) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>ParkWise</Text>
+        <Text style={styles.message}>Starting up…</Text>
+      </View>
+    );
+  }
+
   return (
     <ErrorBoundary>
-      <NavigationContainer>
-        <AuthProvider>
-          <AppRoutes />
-          <StatusBar style="auto" />
-        </AuthProvider>
-      </NavigationContainer>
+      <AccessibilityProvider>
+        <ToastProvider>
+          <AppFrame>
+            <NavigationContainer>
+              <AuthProvider>
+                <AppRoutes />
+                <StatusBar style="auto" />
+              </AuthProvider>
+            </NavigationContainer>
+          </AppFrame>
+        </ToastProvider>
+      </AccessibilityProvider>
     </ErrorBoundary>
   );
 }
@@ -126,7 +193,7 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FA',
+    backgroundColor: '#F6F8FB',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -139,7 +206,17 @@ const styles = StyleSheet.create({
   },
   message: {
     fontSize: 16,
-    color: '#6B7280',
+    color: '#64748B',
     textAlign: 'center',
+  },
+  webOuter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webInner: {
+    flex: 1,
+    width: '100%',
+    maxWidth: PHONE_MAX_WIDTH,
   },
 });

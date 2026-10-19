@@ -1,7 +1,9 @@
+-- Legacy: built for the older 102-slot layout. The live database is the source of truth; see database/live_upgrade/RUN_ORDER_LIVE.md.
 -- ParkWise Database Seeding Script
--- Run after schema.sql, business_rules.sql, and rls_policies.sql.
--- No demo users are created here. Create the first admin in
--- Supabase Authentication > Users, then promote it (see the end of this file).
+-- Run after schema.sql, business_rules.sql, rls_policies.sql and
+-- profile_vehicle_rates_fixes.sql. No demo users are created here. Create the
+-- first admin in Supabase Authentication > Users, then promote it with the
+-- promote-to-admin query in database/RUN_ORDER.md (step 5).
 
 -- 3-floor parking map, 34 slots per floor (102 total), matching the
 -- actual reference images (desktop/src/assets/floor-maps/floor-{n}.png)

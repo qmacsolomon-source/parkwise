@@ -14,12 +14,13 @@
 -- tables, so re-running setup doesn't destroy data.
 --
 -- After running this, you must re-run (in order): schema.sql is already
--- included below, then rls_policies.sql, business_rules.sql, and finally
--- re-create Auth users + seed.sql (see SETUP.md Step 4).
+-- included below, then rls_policies.sql, business_rules.sql,
+-- profile_vehicle_rates_fixes.sql, re-create Auth users + seed.sql, and
+-- finally floor_plan_and_assignment.sql (it needs the slots seed.sql
+-- creates). See database/RUN_ORDER.md for the full fresh-project order.
 
--- Enable UUID extensions
+-- Enable UUID extensions (id defaults use the built-in gen_random_uuid())
 CREATE EXTENSION IF NOT EXISTS btree_gist;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Safely drop existing tables in correct dependency order
 DROP TABLE IF EXISTS audit_log CASCADE;
@@ -61,7 +62,7 @@ CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment',
 -- Walk-in customers registered via Manual Entry never create a login, so id
 -- falls back to an auto-generated UUID with no matching auth.users row.
 CREATE TABLE profiles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT NOT NULL,
@@ -74,7 +75,7 @@ CREATE TABLE profiles (
 
 -- Vehicles table
 CREATE TABLE vehicles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   plate_number TEXT NOT NULL UNIQUE,
   vehicle_type TEXT NOT NULL,
@@ -86,7 +87,7 @@ CREATE TABLE vehicles (
 -- floor/zone/zone_row/zone_col describe WHERE a slot sits on the visual
 -- parking map -- see schema.sql for the full explanation.
 CREATE TABLE slots (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slot_code TEXT NOT NULL UNIQUE,
   is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
   status slot_status NOT NULL DEFAULT 'available',
@@ -99,7 +100,7 @@ CREATE TABLE slots (
 
 -- Reservations table
 CREATE TABLE reservations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
   slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
@@ -130,7 +131,7 @@ CREATE TABLE agent_states (
 
 -- Verification events table
 CREATE TABLE verification_events (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   detected_plate TEXT NOT NULL,
@@ -143,7 +144,7 @@ CREATE TABLE verification_events (
 
 -- Penalties table
 CREATE TABLE penalties (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   type penalty_type NOT NULL,
@@ -154,7 +155,7 @@ CREATE TABLE penalties (
 
 -- Payments table
 CREATE TABLE payments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   base_charge NUMERIC NOT NULL DEFAULT 0,
   overstay_surcharge NUMERIC NOT NULL DEFAULT 0,
@@ -168,7 +169,7 @@ CREATE TABLE payments (
 
 -- Rates table
 CREATE TABLE rates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   hourly_rate NUMERIC NOT NULL DEFAULT 50,
   overstay_per_hour NUMERIC NOT NULL DEFAULT 100,
   no_show_penalty NUMERIC NOT NULL DEFAULT 100,
@@ -181,7 +182,7 @@ CREATE TABLE rates (
 
 -- Notifications table
 CREATE TABLE notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -193,7 +194,7 @@ CREATE TABLE notifications (
 
 -- Audit log table
 CREATE TABLE audit_log (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   action TEXT NOT NULL,
   details JSONB,

@@ -3,12 +3,14 @@ import { Slot } from './types';
 // A plain `.order('slot_code')` sorts "1A10" before "1A2" (string order,
 // not numeric), and with no order at all Postgres returns slots.select()
 // rows in arbitrary physical order -- either way, a flat <select> of all
-// 168 slots comes out looking shuffled. This sorts the way someone
+// 207 slots comes out looking shuffled. This sorts the way someone
 // reading the actual floor map would expect to: by floor, then by walking
-// through the map itself (compact row, block A's top then bottom row,
-// block B's top then bottom row, then the side column), each left to
-// right / top to bottom.
-const ZONE_ORDER: Record<string, number> = { compact: 0, block_a: 1, block_b: 2, side: 3 };
+// through the map itself (block A's top then bottom row, then the side
+// column), each left to right / top to bottom.
+//
+// The live layout has only these two zones (60 block_a + 9 side per floor).
+// Anything else still sorts last rather than being dropped.
+const ZONE_ORDER: Record<string, number> = { block_a: 0, side: 1 };
 const ROW_ORDER: Record<string, number> = { top: 0, bottom: 1 };
 
 export function sortSlotsForDisplay(slots: Slot[]): Slot[] {

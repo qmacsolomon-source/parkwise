@@ -1,3 +1,5 @@
+import type { SlotFacing } from './floorPlan';
+
 export type UserRole = 'customer' | 'attendant' | 'admin';
 export type UserStatus = 'active' | 'disabled';
 export type SlotStatus = 'available' | 'reserved' | 'occupied' | 'unverified' | 'overstay' | 'maintenance';
@@ -7,7 +9,11 @@ export type VerificationResult = 'match' | 'mismatch' | 'low_confidence' | 'fail
 export type PenaltyType = 'late_cancel' | 'no_show' | 'overstay';
 export type PaymentStatus = 'unpaid' | 'paid';
 export type NotificationType = 'reservation' | 'verification' | 'payment' | 'penalty' | 'system';
-export type SlotZone = 'compact' | 'block_a' | 'block_b' | 'side';
+// The LIVE database only uses two zones: 'block_a' (60 bays per floor, a
+// double-loaded row) and 'side' (9 bays per floor, against the far wall).
+// 'compact' and 'block_b' belonged to the older 102-slot layout and are not
+// present in the live data.
+export type SlotZone = 'block_a' | 'side';
 export type SlotZoneRow = 'top' | 'bottom';
 
 export interface Profile {
@@ -28,6 +34,8 @@ export interface Vehicle {
   plate_number: string;
   vehicle_type: string;
   is_default: boolean;
+  /** FALSE once the owner removes a vehicle that has booking history. */
+  is_active?: boolean;
 }
 
 export interface Slot {
@@ -43,6 +51,15 @@ export interface Slot {
   zone: SlotZone;
   zone_row: SlotZoneRow | null;
   zone_col: number;
+  // Geometry on the 1920x1080 plan canvas. All NULL until
+  // database/live_upgrade/03_floor_plan_207.sql has been run; that file only
+  // fills these columns in, it never rewrites a slot.
+  floor_x?: number | null;
+  floor_y?: number | null;
+  floor_w?: number | null;
+  floor_h?: number | null;
+  facing?: SlotFacing | null;
+  entry_rank?: number | null;
 }
 
 export interface Reservation {
@@ -113,7 +130,8 @@ export interface Rate {
   late_cancel_penalty: number;
   late_cancel_window_minutes: number;
   grace_period_minutes: number;
-  updated_by: string;
+  /** Null until an admin edits the rates (see seed.sql / rates fixes). */
+  updated_by: string | null;
   updated_at: string;
 }
 

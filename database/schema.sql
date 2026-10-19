@@ -11,9 +11,10 @@
 -- an ALTER TABLE / ALTER TYPE statement below rather than editing a
 -- CREATE TABLE/TYPE block, so re-applying this file keeps existing rows.
 
--- Enable UUID extensions
+-- Required extension: btree_gist, for the reservation exclusion constraint
+-- below. UUID defaults use the built-in gen_random_uuid() from pg_catalog,
+-- so uuid-ossp is no longer needed.
 CREATE EXTENSION IF NOT EXISTS btree_gist;
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Create custom types (guarded: CREATE TYPE has no native IF NOT EXISTS)
 DO $$ BEGIN
@@ -51,7 +52,7 @@ EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 -- that's why there's no REFERENCES auth.users(id) here (see the ALTER below
 -- for upgrading a database that still has the old hard FK).
 CREATE TABLE IF NOT EXISTS profiles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   phone TEXT NOT NULL,
@@ -64,7 +65,7 @@ CREATE TABLE IF NOT EXISTS profiles (
 
 -- Vehicles table
 CREATE TABLE IF NOT EXISTS vehicles (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   owner_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   plate_number TEXT NOT NULL UNIQUE,
   vehicle_type TEXT NOT NULL,
@@ -84,7 +85,7 @@ CREATE TABLE IF NOT EXISTS vehicles (
 -- blocks) -- it's what the frontend layout template uses to place each
 -- slot, not a guarantee of real-world physical measurement.
 CREATE TABLE IF NOT EXISTS slots (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slot_code TEXT NOT NULL UNIQUE,
   is_pwd BOOLEAN NOT NULL DEFAULT FALSE,
   status slot_status NOT NULL DEFAULT 'available',
@@ -110,7 +111,7 @@ ALTER TABLE slots ADD COLUMN IF NOT EXISTS zone_col SMALLINT NOT NULL DEFAULT 1;
 
 -- Reservations table
 CREATE TABLE IF NOT EXISTS reservations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   vehicle_id UUID NOT NULL REFERENCES vehicles(id) ON DELETE CASCADE,
   slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
@@ -138,7 +139,7 @@ ALTER TABLE reservations ADD COLUMN IF NOT EXISTS annotation TEXT;
 DO $$ BEGIN
   ALTER TABLE profiles DROP CONSTRAINT profiles_id_fkey;
 EXCEPTION WHEN undefined_object THEN NULL; END $$;
-ALTER TABLE profiles ALTER COLUMN id SET DEFAULT uuid_generate_v4();
+ALTER TABLE profiles ALTER COLUMN id SET DEFAULT gen_random_uuid();
 
 -- Agent states table (for camera/verification system)
 CREATE TABLE IF NOT EXISTS agent_states (
@@ -154,7 +155,7 @@ CREATE TABLE IF NOT EXISTS agent_states (
 
 -- Verification events table
 CREATE TABLE IF NOT EXISTS verification_events (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   slot_id UUID NOT NULL REFERENCES slots(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   detected_plate TEXT NOT NULL,
@@ -167,7 +168,7 @@ CREATE TABLE IF NOT EXISTS verification_events (
 
 -- Penalties table
 CREATE TABLE IF NOT EXISTS penalties (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   customer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   type penalty_type NOT NULL,
@@ -178,7 +179,7 @@ CREATE TABLE IF NOT EXISTS penalties (
 
 -- Payments table
 CREATE TABLE IF NOT EXISTS payments (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
   base_charge NUMERIC NOT NULL DEFAULT 0,
   overstay_surcharge NUMERIC NOT NULL DEFAULT 0,
@@ -192,7 +193,7 @@ CREATE TABLE IF NOT EXISTS payments (
 
 -- Rates table
 CREATE TABLE IF NOT EXISTS rates (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   hourly_rate NUMERIC NOT NULL DEFAULT 50,
   overstay_per_hour NUMERIC NOT NULL DEFAULT 100,
   no_show_penalty NUMERIC NOT NULL DEFAULT 100,
@@ -205,7 +206,7 @@ CREATE TABLE IF NOT EXISTS rates (
 
 -- Notifications table
 CREATE TABLE IF NOT EXISTS notifications (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -217,7 +218,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 
 -- Audit log table
 CREATE TABLE IF NOT EXISTS audit_log (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   actor_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
   action TEXT NOT NULL,
   details JSONB,

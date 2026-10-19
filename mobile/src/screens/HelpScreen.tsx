@@ -1,399 +1,250 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Linking } from 'react-native';
-import { colors, spacing, borderRadius, fontSize } from '../theme';
+import { View, Text, StyleSheet, Pressable, Linking } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
+
+import AppScreen from '../components/AppScreen';
+import { Button, Card, ListRow, SectionHeader, ScreenHeader } from '../components/ui';
+import { useTheme } from '../contexts/AccessibilityContext';
+import { spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
 
 type RootStackParamList = {
   Dashboard: undefined;
   Help: undefined;
 };
 
-type FAQItem = {
+type FaqItem = {
   id: string;
   question: string;
   answer: string;
 };
 
-const FAQs: FAQItem[] = [
+type FaqSection = {
+  title: string;
+  items: FaqItem[];
+};
+
+const SUPPORT_EMAIL = 'support@parkwise.ph';
+const SUPPORT_PHONE_DISPLAY = '+63 2 8888 8888';
+const SUPPORT_PHONE_DIAL = '+63288888888';
+
+const SECTIONS: FaqSection[] = [
   {
-    id: '1',
-    question: 'How do I make a reservation?',
-    answer: 'Go to the Dashboard, tap on an available slot, select your vehicle, choose start and end times, and confirm your reservation.',
+    title: 'Booking & your slot',
+    items: [
+      {
+        id: '1',
+        question: 'How do I make a reservation?',
+        answer:
+          'Go to the Dashboard, tap on an available slot, select your vehicle, choose start and end times, and confirm your reservation.',
+      },
+      {
+        id: '2',
+        question: 'How is my slot assigned?',
+        answer:
+          'When you book, ParkWise assigns an available slot for your vehicle automatically. Your assigned slot is shown on the reservation once it is confirmed.',
+      },
+      {
+        id: '3',
+        question: 'Can I change my slot?',
+        answer:
+          'Open your reservation and choose a different available slot. If you have already parked, ask the parking attendant to move you.',
+      },
+      {
+        id: '4',
+        question: 'Can I cancel my reservation?',
+        answer:
+          'Yes, you can cancel. However, cancellations made within the late cancel window will incur a penalty fee.',
+      },
+      {
+        id: '5',
+        question: 'What if I miss my reservation?',
+        answer:
+          "If you don't arrive within the grace period, your reservation will be marked as no-show and a penalty will be applied.",
+      },
+      {
+        id: '6',
+        question: 'How do I read the parking timer?',
+        answer:
+          'The timer on your reservation shows how long you have been parked and how much time remains before your booking ends.',
+      },
+    ],
   },
   {
-    id: '2',
-    question: 'What happens if I overstay?',
-    answer: 'Overstaying will result in an overstay surcharge added to your total payment. The rate is charged per hour beyond your reserved time.',
-  },
-  {
-    id: '3',
-    question: 'Can I cancel my reservation?',
-    answer: 'Yes, you can cancel. However, cancellations made within the late cancel window will incur a penalty fee.',
-  },
-  {
-    id: '4',
-    question: 'How do PWD slots work?',
-    answer: 'PWD slots are reserved for verified PWD permit holders. After registration with your PWD permit number, your account will be verified by staff before you can book PWD slots.',
-  },
-  {
-    id: '5',
-    question: 'What if I miss my reservation?',
-    answer: 'If you don\'t arrive within the grace period, your reservation will be marked as no-show and a penalty will be applied.',
-  },
-  {
-    id: '6',
-    question: 'How do I pay for parking?',
-    answer: 'Payment is handled by parking attendants at the exit. They will calculate your total based on time used, overstay charges, and any penalties.',
+    title: 'Charges & PWD',
+    items: [
+      {
+        id: '7',
+        question: 'What happens if I overstay?',
+        answer:
+          'Overstaying will result in an overstay surcharge added to your total payment. The rate is charged per hour beyond your reserved time.',
+      },
+      {
+        id: '8',
+        question: 'How do I pay for parking?',
+        answer:
+          'Payment is handled by parking attendants at the exit. They will calculate your total based on time used, overstay charges, and any penalties.',
+      },
+      {
+        id: '9',
+        question: 'How do PWD slots work?',
+        answer:
+          'PWD slots are reserved for verified PWD permit holders. After registration with your PWD permit number, your account will be verified by staff before you can book PWD slots.',
+      },
+    ],
   },
 ];
 
 export default function HelpScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const [expandedFAQ, setExpandedFAQ] = useState<string | null>(null);
-  const [contactName, setContactName] = useState('');
-  const [contactEmail, setContactEmail] = useState('');
-  const [contactMessage, setContactMessage] = useState('');
-  const [sending, setSending] = useState(false);
+  const { colors, textScale } = useTheme();
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const toggleFAQ = (id: string) => {
-    setExpandedFAQ(expandedFAQ === id ? null : id);
-  };
-
-  const handleSendSupport = async () => {
-    if (!contactName.trim() || !contactEmail.trim() || !contactMessage.trim()) {
-      Alert.alert('Error', 'Please fill in all fields');
-      return;
-    }
-
-    if (!/\S+@\S+\.\S+/.test(contactEmail)) {
-      Alert.alert('Error', 'Please enter a valid email address');
-      return;
-    }
-
-    setSending(true);
-    // In a real app, this would send to a support ticket system
-    setTimeout(() => {
-      Alert.alert(
-        'Support Request Sent',
-        'We have received your message and will get back to you soon.',
-        [{ text: 'OK', onPress: () => {
-          setContactName('');
-          setContactEmail('');
-          setContactMessage('');
-        }}]
-      );
-      setSending(false);
-    }, 1000);
-  };
-
-  const handleCallSupport = () => {
-    // In a real app, this would call the support phone number
-    Alert.alert('Call Support', 'Support hotline: +63 2 8888 8888');
-  };
-
-  const handleEmailSupport = () => {
-    Linking.openURL('mailto:support@parkwise.ph');
-  };
+  const toggle = (id: string) => setExpandedId((current) => (current === id ? null : id));
 
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Help & Support</Text>
-
-        {/* Quick Actions */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActionsContainer}>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={handleCallSupport}
-              accessibilityLabel="Call support hotline"
-              accessibilityRole="button"
-            >
-              <Text style={styles.quickActionIcon}>📞</Text>
-              <Text style={styles.quickActionLabel}>Call Support</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.quickActionButton}
-              onPress={handleEmailSupport}
-              accessibilityLabel="Email support"
-              accessibilityRole="button"
-            >
-              <Text style={styles.quickActionIcon}>✉️</Text>
-              <Text style={styles.quickActionLabel}>Email Us</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* FAQs */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
-          {FAQs.map(faq => (
-            <TouchableOpacity
-              key={faq.id}
-              style={styles.faqCard}
-              onPress={() => toggleFAQ(faq.id)}
-              accessibilityLabel={faq.question}
-              accessibilityRole="button"
-              accessibilityState={{ expanded: expandedFAQ === faq.id }}
-            >
-              <View style={styles.faqHeader}>
-                <Text style={styles.faqQuestion}>{faq.question}</Text>
-                <Text style={styles.faqIcon}>{expandedFAQ === faq.id ? '−' : '+'}</Text>
-              </View>
-              {expandedFAQ === faq.id && (
-                <Text style={styles.faqAnswer}>{faq.answer}</Text>
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Contact Form */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Send us a message</Text>
-          <View style={styles.card}>
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Name</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Your name"
-                placeholderTextColor="#9CA3AF"
-                value={contactName}
-                onChangeText={setContactName}
-                editable={!sending}
+    <AppScreen header={<ScreenHeader title="Help & support" onBack={() => navigation.goBack()} />} scroll>
+      {SECTIONS.map((section, index) => (
+        <React.Fragment key={section.title}>
+          <SectionHeader title={section.title} style={index > 0 ? styles.sectionSpacing : undefined} />
+          <Card style={styles.faqCard}>
+            {section.items.map((item) => (
+              <FaqRow
+                key={item.id}
+                item={item}
+                expanded={expandedId === item.id}
+                onToggle={() => toggle(item.id)}
               />
-            </View>
+            ))}
+          </Card>
+        </React.Fragment>
+      ))}
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Email</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="your@email.com"
-                placeholderTextColor="#9CA3AF"
-                value={contactEmail}
-                onChangeText={setContactEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                editable={!sending}
-              />
-            </View>
+      <SectionHeader title="Contact" style={styles.sectionSpacing} />
+      <Card>
+        <Text style={[typeToken('subtitle', textScale), { color: colors.text }]}>Report a problem</Text>
+        <Text style={[typeToken('body', textScale), { color: colors.textMuted, marginTop: spacing.xxs }]}>
+          If something is not working or you need help with a booking, contact the ParkWise support team.
+        </Text>
+        <Button
+          label="Email support"
+          icon="mail-outline"
+          onPress={() => Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
+          accessibilityHint={`Opens your email app to write to ${SUPPORT_EMAIL}.`}
+          style={styles.contactButton}
+        />
+        <Button
+          label={`Call ${SUPPORT_PHONE_DISPLAY}`}
+          variant="secondary"
+          icon="call-outline"
+          onPress={() => Linking.openURL(`tel:${SUPPORT_PHONE_DIAL}`)}
+          accessibilityHint="Opens your phone app to call ParkWise support."
+          style={styles.contactButton}
+        />
+      </Card>
 
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Message</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Describe your issue or question..."
-                placeholderTextColor="#9CA3AF"
-                value={contactMessage}
-                onChangeText={setContactMessage}
-                multiline
-                numberOfLines={4}
-                editable={!sending}
-              />
-            </View>
+      <SectionHeader title="Emergency" style={styles.sectionSpacing} />
+      <Card>
+        <ListRow
+          title="Emergency"
+          value="911"
+          subtitle="For emergencies, please call emergency services directly."
+          icon="warning-outline"
+        />
+      </Card>
 
-            <TouchableOpacity
-              style={[styles.button, sending && styles.buttonDisabled]}
-              onPress={handleSendSupport}
-              disabled={sending}
-            >
-              <Text style={styles.buttonText}>
-                {sending ? 'Sending...' : 'Send Message'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+      <View style={styles.footer}>
+        <Text style={[typeToken('small', textScale), styles.footerText, { color: colors.textMuted }]}>
+          ParkWise Customer App v1.0.0
+        </Text>
+        <Text style={[typeToken('small', textScale), styles.footerText, { color: colors.textMuted }]}>
+          © 2024 ParkWise. All rights reserved.
+        </Text>
+      </View>
+    </AppScreen>
+  );
+}
 
-        {/* Emergency Contact */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Emergency</Text>
-          <View style={styles.emergencyCard}>
-            <Text style={styles.emergencyTitle}>Emergency Contact</Text>
-            <Text style={styles.emergencyPhone}>🚨 911</Text>
-            <Text style={styles.emergencyDescription}>
-              For emergencies, please call emergency services directly.
-            </Text>
-          </View>
-        </View>
+function FaqRow({
+  item,
+  expanded,
+  onToggle,
+}: {
+  item: FaqItem;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { colors, textScale } = useTheme();
 
-        {/* App Info */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>ParkWise Customer App v1.0.0</Text>
-          <Text style={styles.footerText}>© 2024 ParkWise. All rights reserved.</Text>
-        </View>
-      </ScrollView>
+  return (
+    <View>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={item.question}
+        accessibilityHint={expanded ? 'Collapses the answer' : 'Expands the answer'}
+        accessibilityState={{ expanded }}
+        style={({ pressed }) => [
+          styles.faqHeader,
+          {
+            borderColor: colors.border,
+            backgroundColor: pressed ? colors.surfaceAlt : 'transparent',
+          },
+        ]}
+      >
+        <Text style={[typeToken('bodyStrong', textScale), styles.faqQuestion, { color: colors.text }]}>
+          {item.question}
+        </Text>
+        <Ionicons
+          name="chevron-down"
+          size={20}
+          color={colors.tealDark}
+          style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}
+        />
+      </Pressable>
+
+      {expanded ? (
+        <Text style={[typeToken('body', textScale), styles.faqAnswer, { color: colors.textMuted }]}>
+          {item.answer}
+        </Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-  },
-  title: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: spacing.lg,
-  },
-  section: {
-    marginBottom: spacing.xl,
-  },
-  sectionTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  quickActionsContainer: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  quickActionButton: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-    minHeight: 100,
-    justifyContent: 'center',
-  },
-  quickActionIcon: {
-    fontSize: 32,
-    marginBottom: spacing.sm,
-  },
-  quickActionLabel: {
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: colors.primary,
-    textAlign: 'center',
+  sectionSpacing: {
+    marginTop: spacing.lg,
   },
   faqCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    padding: 0,
+    overflow: 'hidden',
   },
   faqHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: spacing.sm,
+    minHeight: TOUCH_TARGET,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   faqQuestion: {
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: colors.text,
     flex: 1,
-    marginRight: spacing.sm,
-  },
-  faqIcon: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: colors.primary,
   },
   faqAnswer: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xxs,
+    paddingBottom: spacing.md,
+  },
+  contactButton: {
     marginTop: spacing.md,
-    lineHeight: 22,
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  inputGroup: {
-    marginBottom: spacing.md,
-  },
-  label: {
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    fontSize: fontSize.md,
-    color: colors.text,
-    minHeight: 48,
-  },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.md,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.surface,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  emergencyCard: {
-    backgroundColor: colors.error,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    alignItems: 'center',
-  },
-  emergencyTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
-    color: colors.surface,
-    marginBottom: spacing.sm,
-  },
-  emergencyPhone: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.surface,
-    marginBottom: spacing.sm,
-  },
-  emergencyDescription: {
-    fontSize: fontSize.md,
-    color: colors.surface,
-    textAlign: 'center',
   },
   footer: {
     marginTop: spacing.xl,
-    paddingVertical: spacing.lg,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
+    gap: spacing.xxs,
   },
   footerText: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
     textAlign: 'center',
-    marginBottom: spacing.xs,
   },
 });

@@ -1,25 +1,85 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Reservation, Payment, Penalty } from '@parkwise/shared';
-import { colors, spacing, borderRadius, fontSize } from '../theme';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { useTheme } from '../contexts/AccessibilityContext';
+import { spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
+import { Card, EmptyState, ScreenHeader, SectionHeader, SkeletonList, StatusChip } from '../components/ui';
+import type { ChipTone } from '../components/ui';
+import AppScreen from '../components/AppScreen';
 
-type RootStackParamList = {
-  Dashboard: undefined;
-  History: undefined;
-};
+function humanize(value: string): string {
+  return value.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function reservationTone(status: string): ChipTone {
+  switch (status) {
+    case 'completed':
+      return 'success';
+    case 'no_show':
+      return 'warning';
+    case 'overstay':
+      return 'danger';
+    case 'cancelled':
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
+
+function penaltyTone(status: string): ChipTone {
+  switch (status) {
+    case 'paid':
+      return 'success';
+    case 'unpaid':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+interface AmountRowProps {
+  label: string;
+  value: string;
+  strong?: boolean;
+}
+
+function AmountRow({ label, value, strong = false }: AmountRowProps) {
+  const { colors, textScale } = useTheme();
+
+  return (
+    <View
+      style={styles.amountRow}
+      accessible
+      accessibilityRole="text"
+      accessibilityLabel={`${label}: ${value}`}
+    >
+      <Text
+        style={[
+          typeToken(strong ? 'bodyStrong' : 'body', textScale),
+          { color: strong ? colors.text : colors.textMuted },
+        ]}
+      >
+        {label}
+      </Text>
+      <Text style={[typeToken(strong ? 'subtitle' : 'bodyStrong', textScale), { color: colors.text }]}>
+        {value}
+      </Text>
+    </View>
+  );
+}
 
 export default function HistoryScreen() {
   const { profile } = useAuth();
-  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { colors, textScale } = useTheme();
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [penalties, setPenalties] = useState<Penalty[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<'reservations' | 'payments' | 'penalties'>('reservations');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!supabase) {
@@ -72,18 +132,6 @@ export default function HistoryScreen() {
     loadData();
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return colors.success;
-      case 'cancelled': return colors.textSecondary;
-      case 'no_show': return colors.warning;
-      case 'overstay': return colors.error;
-      case 'paid': return colors.success;
-      case 'unpaid': return colors.error;
-      default: return colors.textSecondary;
-    }
-  };
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -103,304 +151,265 @@ export default function HistoryScreen() {
     return `₱${amount.toFixed(2)}`;
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading history...</Text>
-      </View>
-    );
-  }
+  const toggleExpanded = (id: string) => {
+    setExpandedId((current) => (current === id ? null : id));
+  };
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        <Text style={styles.title}>Parking History</Text>
+    <AppScreen
+      header={
+        <ScreenHeader
+          title="History"
+          subtitle={
+            reservations.length > 0
+              ? `${reservations.length} past reservation${reservations.length === 1 ? '' : 's'}`
+              : undefined
+          }
+        />
+      }
+      tab="History"
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    >
+      {loading ? (
+        <SkeletonList rows={4} />
+      ) : (
+        <>
+          <SectionHeader title="Reservation history" style={styles.section} />
 
-        {/* Tab Navigation */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tab, selectedTab === 'reservations' && styles.activeTab]}
-            onPress={() => setSelectedTab('reservations')}
-          >
-            <Text style={[styles.tabText, selectedTab === 'reservations' && styles.activeTabText]}>
-              Reservations
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, selectedTab === 'payments' && styles.activeTab]}
-            onPress={() => setSelectedTab('payments')}
-          >
-            <Text style={[styles.tabText, selectedTab === 'payments' && styles.activeTabText]}>
-              Payments
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, selectedTab === 'penalties' && styles.activeTab]}
-            onPress={() => setSelectedTab('penalties')}
-          >
-            <Text style={[styles.tabText, selectedTab === 'penalties' && styles.activeTabText]}>
-              Penalties
-            </Text>
-          </TouchableOpacity>
-        </View>
+          {reservations.length === 0 ? (
+            <EmptyState
+              icon="receipt-outline"
+              title="No history yet"
+              message="Your completed reservations will appear here."
+            />
+          ) : (
+            reservations.map((reservation) => {
+              const expanded = expandedId === reservation.id;
+              const payment = payments.find((item) => item.reservation_id === reservation.id);
+              const windowLabel = `${formatTime(reservation.start_time)} – ${formatTime(
+                reservation.end_time
+              )}`;
 
-        {/* Reservations Tab */}
-        {selectedTab === 'reservations' && (
-          <>
-            {reservations.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyIcon}>🅿️</Text>
-                <Text style={styles.emptyTitle}>No History</Text>
-                <Text style={styles.emptyMessage}>
-                  Your completed reservations will appear here.
-                </Text>
-              </View>
-            ) : (
-              reservations.map(reservation => (
-                <View key={reservation.id} style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.bookingCode}>{reservation.booking_code}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(reservation.status) }]}>
-                      <Text style={styles.statusText}>{reservation.status}</Text>
+              return (
+                <Card key={reservation.id} style={styles.card}>
+                  <View style={styles.cardTop}>
+                    <View style={styles.cardTopText}>
+                      <Text
+                        style={[typeToken('subtitle', textScale), { color: colors.navy }]}
+                        numberOfLines={1}
+                      >
+                        {reservation.booking_code}
+                      </Text>
+                      <Text
+                        style={[typeToken('small', textScale), { color: colors.textMuted }]}
+                        numberOfLines={1}
+                      >
+                        {formatDate(reservation.start_time)} · {windowLabel}
+                      </Text>
                     </View>
+                    <StatusChip
+                      label={humanize(reservation.status)}
+                      tone={reservationTone(reservation.status)}
+                    />
                   </View>
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Date</Text>
-                    <Text style={styles.value}>{formatDate(reservation.start_time)}</Text>
-                  </View>
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Time</Text>
-                    <Text style={styles.value}>
-                      {formatTime(reservation.start_time)} - {formatTime(reservation.end_time)}
+
+                  <View
+                    style={styles.slotRow}
+                    accessible
+                    accessibilityRole="text"
+                    accessibilityLabel={`Slot: ${reservation.slot_id}`}
+                  >
+                    <Ionicons name="car-outline" size={18} color={colors.textMuted} />
+                    <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
+                      Slot
+                    </Text>
+                    <Text
+                      style={[
+                        typeToken('bodyStrong', textScale),
+                        styles.slotValue,
+                        { color: colors.text },
+                      ]}
+                      numberOfLines={1}
+                      ellipsizeMode="middle"
+                    >
+                      {reservation.slot_id}
                     </Text>
                   </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
 
-        {/* Payments Tab */}
-        {selectedTab === 'payments' && (
-          <>
-            {payments.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyIcon}>💳</Text>
-                <Text style={styles.emptyTitle}>No Payments</Text>
-                <Text style={styles.emptyMessage}>
-                  Your payment history will appear here.
-                </Text>
-              </View>
-            ) : (
-              payments.map(payment => (
-                <View key={payment.id} style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle}>Payment</Text>
-                    <Text style={styles.totalAmount}>{formatCurrency(payment.total)}</Text>
-                  </View>
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Base Charge</Text>
-                    <Text style={styles.value}>{formatCurrency(payment.base_charge)}</Text>
-                  </View>
-                  {payment.overstay_surcharge > 0 && (
-                    <View style={styles.cardRow}>
-                      <Text style={styles.label}>Overstay</Text>
-                      <Text style={[styles.value, styles.overstayText]}>
-                        {formatCurrency(payment.overstay_surcharge)}
+                  <Pressable
+                    onPress={() => toggleExpanded(reservation.id)}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded }}
+                    accessibilityLabel={`Itemized detail for ${reservation.booking_code}`}
+                    accessibilityHint={expanded ? 'Collapses the charges' : 'Expands the charges'}
+                    style={({ pressed }) => [
+                      styles.toggle,
+                      {
+                        borderTopColor: colors.border,
+                        backgroundColor: pressed ? colors.surfaceAlt : 'transparent',
+                      },
+                    ]}
+                  >
+                    <Text style={[typeToken('bodyStrong', textScale), { color: colors.tealDark }]}>
+                      Itemized detail
+                    </Text>
+                    <Ionicons
+                      name={expanded ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={colors.tealDark}
+                    />
+                  </Pressable>
+
+                  {expanded ? (
+                    <View style={styles.items}>
+                      <AmountRow
+                        label="Base charge"
+                        value={payment ? formatCurrency(payment.base_charge) : '—'}
+                      />
+                      <AmountRow
+                        label="Overstay surcharge"
+                        value={payment ? formatCurrency(payment.overstay_surcharge) : '—'}
+                      />
+                      <AmountRow
+                        label="Penalty total"
+                        value={payment ? formatCurrency(payment.penalty_total) : '—'}
+                      />
+                      <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                      <AmountRow
+                        label="Total"
+                        value={payment ? formatCurrency(payment.total) : '—'}
+                        strong
+                      />
+
+                      {!payment ? (
+                        <Text
+                          style={[typeToken('small', textScale), styles.note, { color: colors.textMuted }]}
+                        >
+                          No itemized charges recorded for this reservation.
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                </Card>
+              );
+            })
+          )}
+
+          {penalties.length > 0 ? (
+            <>
+              <SectionHeader title="Penalties" style={styles.sectionSpacious} />
+              {penalties.map((penalty) => (
+                <Card key={penalty.id} style={styles.card}>
+                  <View style={styles.cardTop}>
+                    <View style={styles.cardTopText}>
+                      <Text
+                        style={[typeToken('subtitle', textScale), { color: colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {humanize(penalty.type)}
+                      </Text>
+                      <Text
+                        style={[typeToken('small', textScale), { color: colors.textMuted }]}
+                        numberOfLines={1}
+                      >
+                        {formatDate(penalty.created_at)}
                       </Text>
                     </View>
-                  )}
-                  {payment.penalty_total > 0 && (
-                    <View style={styles.cardRow}>
-                      <Text style={styles.label}>Penalties</Text>
-                      <Text style={[styles.value, styles.penaltyText]}>
-                        {formatCurrency(payment.penalty_total)}
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Paid At</Text>
-                    <Text style={styles.value}>{formatDate(payment.paid_at)}</Text>
+                    <StatusChip
+                      label={humanize(penalty.status)}
+                      tone={penaltyTone(penalty.status)}
+                    />
                   </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
 
-        {/* Penalties Tab */}
-        {selectedTab === 'penalties' && (
-          <>
-            {penalties.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyIcon}>✅</Text>
-                <Text style={styles.emptyTitle}>No Penalties</Text>
-                <Text style={styles.emptyMessage}>
-                  Great job! You have no penalties.
-                </Text>
-              </View>
-            ) : (
-              penalties.map(penalty => (
-                <View key={penalty.id} style={styles.card}>
-                  <View style={styles.cardHeader}>
-                    <Text style={styles.cardTitle}>{penalty.type.replace('_', ' ').toUpperCase()}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: getStatusColor(penalty.status) }]}>
-                      <Text style={styles.statusText}>{penalty.status}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Amount</Text>
-                    <Text style={[styles.value, styles.penaltyText]}>
+                  <View
+                    style={styles.slotRow}
+                    accessible
+                    accessibilityRole="text"
+                    accessibilityLabel={`Amount: ${formatCurrency(penalty.amount)}`}
+                  >
+                    <Ionicons name="pricetag-outline" size={18} color={colors.textMuted} />
+                    <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
+                      Amount
+                    </Text>
+                    <Text
+                      style={[
+                        typeToken('bodyStrong', textScale),
+                        styles.slotValue,
+                        { color: colors.danger },
+                      ]}
+                    >
                       {formatCurrency(penalty.amount)}
                     </Text>
                   </View>
-                  <View style={styles.cardRow}>
-                    <Text style={styles.label}>Date</Text>
-                    <Text style={styles.value}>{formatDate(penalty.created_at)}</Text>
-                  </View>
-                </View>
-              ))
-            )}
-          </>
-        )}
-      </ScrollView>
-    </View>
+                </Card>
+              ))}
+            </>
+          ) : null}
+        </>
+      )}
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-  },
-  loadingText: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.xxl,
-  },
-  title: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.primary,
-    marginBottom: spacing.lg,
-  },
-  tabContainer: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xs,
-    marginBottom: spacing.lg,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-    borderRadius: borderRadius.md,
-  },
-  activeTab: {
-    backgroundColor: colors.primary,
-  },
-  tabText: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    fontWeight: '600',
-  },
-  activeTabText: {
-    color: colors.surface,
-  },
-  emptyCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
-    color: colors.primary,
+  section: {
     marginBottom: spacing.sm,
   },
-  emptyMessage: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
+  sectionSpacious: {
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
   },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.md,
-  },
-  bookingCode: {
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  cardTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
-    color: colors.text,
-  },
-  totalAmount: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
-    color: colors.success,
-  },
-  statusBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.sm,
-  },
-  statusText: {
-    fontSize: fontSize.xs,
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  cardRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     marginBottom: spacing.sm,
   },
-  label: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
+  cardTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
-  value: {
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: colors.text,
+  cardTopText: {
+    flex: 1,
+    gap: spacing.xxs,
   },
-  overstayText: {
-    color: colors.warning,
+  slotRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
   },
-  penaltyText: {
-    color: colors.error,
+  slotValue: {
+    flex: 1,
+    textAlign: 'right',
+  },
+  toggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    minHeight: TOUCH_TARGET,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderRadius: 0,
+  },
+  items: {
+    gap: spacing.xs,
+    paddingTop: spacing.sm,
+  },
+  amountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    minHeight: 32,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginVertical: spacing.xxs,
+  },
+  note: {
+    marginTop: spacing.xxs,
   },
 });

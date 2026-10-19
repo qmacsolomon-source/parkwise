@@ -43,6 +43,10 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ## Step 4: Set Up Database
 
+> For a brand-new, empty project, the canonical copy-paste order — with a
+> per-file CHECK query and a final "everything is installed" query — is in
+> `database/RUN_ORDER.md`. Run one file per query.
+
 ### 4.1 Run Schema
 1. In Supabase dashboard, go to **SQL Editor**
 2. Click "New Query"
@@ -65,43 +69,71 @@ warning header before running it).
 2. Copy contents of `database/business_rules.sql`
 3. Paste and click "Run"
 
-### 4.4 Create Auth Users
-1. Go to **Authentication > Users** in Supabase dashboard
-2. Create these users with temporary passwords:
+### 4.4 Run Profile, Vehicle and Rates Fixes
+1. Create new query in SQL Editor
+2. Copy contents of `database/profile_vehicle_rates_fixes.sql`
+3. Paste and click "Run"
 
-   **Admin:**
+Run this BEFORE the Auth users below: it installs the
+`on_auth_user_created` trigger, so every new user gets a `profiles` row
+(and their first vehicle) automatically. It needs only `schema.sql` and
+`rls_policies.sql` to have been applied.
+
+### 4.5 Create Auth Users
+1. Go to **Authentication > Users** in Supabase dashboard
+2. Create your first user — this will be the admin:
    - Email: `admin@parkwise.com`
    - Password: (choose one)
    - Copy the User ID (UUID)
+3. Optionally create more users now (e.g. `attendant@parkwise.com`,
+   `john@example.com`, `jane@example.com`) the same way.
 
-   **Attendant:**
-   - Email: `attendant@parkwise.com`
-   - Password: (choose one)
-   - Copy the User ID (UUID)
+Every new user automatically gets a `profiles` row from the trigger installed
+in step 4.4 — no UUID editing is required anywhere.
 
-   **Customer 1:**
-   - Email: `john@example.com`
-   - Password: (choose one)
-   - Copy the User ID (UUID)
+### 4.6 Promote your first user to admin
+The trigger from 4.4 gives every new user the role `customer`, so promote your
+first user explicitly. `profiles.phone` is `NOT NULL`, so a phone value is
+supplied. Replace the email with the one you created in 4.5:
 
-   **Customer 2:**
-   - Email: `jane@example.com`
-   - Password: (choose one)
-   - Copy the User ID (UUID)
+```sql
+INSERT INTO public.profiles (id, full_name, email, phone, role)
+SELECT u.id,
+       COALESCE(NULLIF(u.raw_user_meta_data->>'full_name', ''), 'ParkWise Admin'),
+       COALESCE(u.email, 'admin@parkwise.local'),
+       COALESCE(NULLIF(u.raw_user_meta_data->>'phone', ''), '09171234567'),
+       'admin'
+  FROM auth.users u
+ WHERE u.email = 'admin@parkwise.com'
+ON CONFLICT (id) DO UPDATE SET role = 'admin';
+```
 
-### 4.5 Run Seed Script
+### 4.7 Run Seed Script
 1. Open `database/seed.sql`
-2. Replace the placeholder UUIDs with the actual User IDs from step 4.4:
-   ```sql
-   admin_user_id UUID := '00000000-0000-0000-0000-000000000001'; -- REPLACE WITH ACTUAL ADMIN UUID
-   attendant_user_id UUID := '00000000-0000-0000-0000-000000000002'; -- REPLACE WITH ACTUAL ATTENDANT UUID
-   customer1_user_id UUID := '00000000-0000-0000-0000-000000000003'; -- REPLACE WITH ACTUAL CUSTOMER1 UUID
-   customer2_user_id UUID := '00000000-0000-0000-0000-000000000004'; -- REPLACE WITH ACTUAL CUSTOMER2 UUID
-   ```
-3. Copy the modified seed.sql
-4. Paste in SQL Editor and click "Run"
+2. Copy it as-is — it needs no edits and creates no users
+3. Paste in SQL Editor and click "Run"
 
-### 4.6 Enable Realtime
+This creates the parking map: 3 floors x 34 slots (102 total), one rates row,
+and one agent state per slot.
+
+### 4.8 Run Floor Plan and Assignment
+1. Create new query in SQL Editor
+2. Copy contents of `database/floor_plan_and_assignment.sql`
+3. Paste and click "Run"
+
+This must come AFTER `seed.sql`. It adds the floor-plan geometry columns to
+`slots`, then backfills `floor_x` / `floor_y` / `floor_w` / `floor_h` /
+`facing` / `entry_rank` on the slots `seed.sql` created — so running it on an
+empty `slots` table leaves the map blank. It also depends on `rls_policies.sql`
+(`is_admin()`) and `business_rules.sql` (`is_pwd_verified()`,
+`has_unpaid_penalties()`, `create_notification()`, `log_audit()`).
+
+The file wraps everything in one `BEGIN; ... COMMIT;`, so if you run it out of
+order the first `relation "slots" does not exist` kicks off a long run of
+"current transaction is aborted" messages. Only the first error is real — fix
+that and re-run the file.
+
+### 4.9 Enable Realtime
 1. Go to **Database > Replication** in Supabase dashboard
 2. Ensure "Realtime" is enabled
 3. The following tables should already be enabled (from seed.sql):
@@ -142,11 +174,11 @@ The console will open at `http://localhost:5173`
 
 **Test with admin account:**
 - Email: `admin@parkwise.com`
-- Password: (what you set in step 4.4)
+- Password: (what you set in step 4.5)
 
 **Test with attendant account:**
 - Email: `attendant@parkwise.com`
-- Password: (what you set in step 4.4)
+- Password: (what you set in step 4.5)
 
 ## Step 7: Run Mobile App
 
@@ -163,14 +195,14 @@ This will start the Expo development server. You can:
 
 **Test with customer account:**
 - Email: `john@example.com` or `jane@example.com`
-- Password: (what you set in step 4.4)
+- Password: (what you set in step 4.5)
 
 ## Step 8: Test the System
 
 ### Test Desktop Console
 1. Login as attendant
-2. View all 20 slots (A1-A20)
-3. Check that A1 and A2 show PWD badges
+2. View all 102 slots (34 per floor, across 3 floors)
+3. Check that 1A11, 1A12, 2A11, 2A12, 3A11 and 3A12 show PWD badges
 4. View reservations tab (empty initially)
 
 ### Test Mobile App
@@ -190,9 +222,9 @@ This will start the Expo development server. You can:
 
 ## Default Data
 
-### Slots (20 total)
-- A1-A20: Regular slots
-- A1, A2: PWD slots (blue badge)
+### Slots (102 total)
+- 3 floors x 34 slots: `{floor}A1`..`{floor}A24` (block_a) and `{floor}S1`..`{floor}S10` (side)
+- PWD slots (blue badge): 1A11, 1A12, 2A11, 2A12, 3A11, 3A12
 
 ### Rates
 - Hourly rate: ₱50

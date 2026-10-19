@@ -10,6 +10,7 @@ interface AuthContextType extends AuthState {
     email: string;
     phone: string;
     plate_number: string;
+    vehicle_type?: string;
     password: string;
     pwd_permit_number?: string | null;
   }) => Promise<void>;
@@ -17,6 +18,27 @@ interface AuthContextType extends AuthState {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/**
+ * Loads the profile and, when the row is missing, asks the database to build
+ * it from the auth metadata (ensure_my_profile). A missing profile must never
+ * throw here -- the UI falls back to the session email instead.
+ */
+async function resolveProfile(userId: string): Promise<Profile | null> {
+  try {
+    const profile = await authService.getProfile(userId);
+    if (profile) return profile;
+  } catch (error) {
+    console.warn('[startup] profile fetch failed:', error);
+  }
+
+  try {
+    return await authService.ensureProfile();
+  } catch (error) {
+    console.warn('[startup] could not repair the missing profile:', error);
+    return null;
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
@@ -64,12 +86,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Profile is fetched after loading is cleared so it can never block navigation.
       if (session?.user && !cancelled) {
-        try {
-          const profile = await authService.getProfile(session.user.id);
-          if (!cancelled) setState((prev) => ({ ...prev, profile }));
-        } catch (error) {
-          console.error('[startup] profile fetch failed:', error);
-        }
+        const profile = await resolveProfile(session.user.id);
+        if (!cancelled) setState((prev) => ({ ...prev, profile }));
       }
     };
 
@@ -87,10 +105,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setState({ user: session.user, profile: null, loading: false });
 
-        authService
-          .getProfile(session.user.id)
-          .then((profile) => setState((prev) => ({ ...prev, profile })))
-          .catch((error) => console.error('[startup] profile fetch after auth change failed:', error));
+        resolveProfile(session.user.id).then((profile) =>
+          setState((prev) => ({ ...prev, profile }))
+        );
       }
     );
 
@@ -103,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = async (email: string, password: string, rememberMe?: boolean) => {
     const data = await authService.login({ email, password });
     if (data.user) {
-      const profile = await authService.getProfile(data.user.id);
+      const profile = await resolveProfile(data.user.id);
       setState({
         user: data.user,
         profile,
@@ -117,12 +134,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string;
     phone: string;
     plate_number: string;
+    vehicle_type?: string;
     password: string;
     pwd_permit_number?: string | null;
   }) => {
     const result = await authService.register(data);
     if (result.user) {
-      const profile = await authService.getProfile(result.user.id);
+      const profile = await resolveProfile(result.user.id);
       setState({
         user: result.user,
         profile,
@@ -146,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = async () => {
     if (state.user) {
-      const profile = await authService.getProfile(state.user.id);
+      const profile = await resolveProfile(state.user.id);
       setState(prev => ({ ...prev, profile }));
     }
   };

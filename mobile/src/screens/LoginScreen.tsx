@@ -1,18 +1,34 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
-import { useAuth } from '../contexts/AuthContext';
-import { isConfigured } from '@parkwise/shared';
-import { colors, spacing, borderRadius, fontSize } from '../theme';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { isConfigured } from '@parkwise/shared';
+import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/AccessibilityContext';
+import { radius, spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
+import { Button, Card, TextField, ScreenHeader, BottomSheet } from '../components/ui';
 
 type RootStackParamList = {
   Login: undefined;
   Registration: undefined;
 };
 
+type FormMessage = { tone: 'error' | 'success' | 'info'; text: string };
+
 export default function LoginScreen() {
   const { login, resetPassword } = useAuth();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { colors, textScale } = useTheme();
+
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -23,16 +39,24 @@ export default function LoginScreen() {
   const [resetLoading, setResetLoading] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formMessage, setFormMessage] = useState<FormMessage | null>(null);
+
+  const tones = {
+    error: { bg: colors.dangerTint, fg: colors.danger, icon: 'alert-circle' as const },
+    success: { bg: colors.successTint, fg: colors.success, icon: 'checkmark-circle' as const },
+    info: { bg: colors.infoTint, fg: colors.info, icon: 'information-circle' as const },
+  };
+  const bannerTone = tones[formMessage?.tone ?? 'info'];
 
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
-    
+
     if (!identifier.trim()) {
       newErrors.identifier = 'Email or phone is required';
     } else if (!/\S+@\S+\.\S+/.test(identifier) && !/^\d{11}$/.test(identifier.replace(/\D/g, ''))) {
       newErrors.identifier = 'Invalid email or phone format';
     }
-    
+
     if (!password) newErrors.password = 'Password is required';
 
     setErrors(newErrors);
@@ -43,10 +67,11 @@ export default function LoginScreen() {
     if (!validateForm()) return;
 
     setLoading(true);
+    setFormMessage(null);
     try {
       await login(identifier, password, rememberMe);
     } catch (error: any) {
-      Alert.alert('Login Failed', error.message || 'Please check your credentials');
+      setFormMessage({ tone: 'error', text: error.message || 'Please check your credentials' });
     } finally {
       setLoading(false);
     }
@@ -54,416 +79,270 @@ export default function LoginScreen() {
 
   const handleResetPassword = async () => {
     if (!resetEmail.trim() || !/\S+@\S+\.\S+/.test(resetEmail)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+      setErrors((prev) => ({ ...prev, resetEmail: 'Please enter a valid email address' }));
       return;
     }
 
+    setErrors((prev) => ({ ...prev, resetEmail: '' }));
     setResetLoading(true);
     try {
       await resetPassword(resetEmail);
-      Alert.alert(
-        'Password Reset Sent',
-        'Check your email for the password reset link',
-        [{ text: 'OK', onPress: () => setShowResetModal(false) }]
-      );
       setResetEmail('');
+      setShowResetModal(false);
+      setFormMessage({
+        tone: 'success',
+        text: 'Check your email for the password reset link.',
+      });
     } catch (error: any) {
-      Alert.alert('Reset Failed', error.message || 'Please try again');
+      setErrors((prev) => ({ ...prev, resetEmail: error.message || 'Please try again' }));
     } finally {
       setResetLoading(false);
     }
   };
 
-  const handleBiometricLogin = async () => {
-    Alert.alert('Biometric Login', 'Biometric authentication will be implemented with device-specific libraries (react-native-fingerprint-scanner or expo-local-authentication)');
+  const handleBiometricLogin = () => {
+    setFormMessage({
+      tone: 'info',
+      text: 'Biometric authentication will be implemented with device-specific libraries (react-native-fingerprint-scanner or expo-local-authentication).',
+    });
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.card}>
-          <Text style={styles.title}>ParkWise</Text>
-          <Text style={styles.subtitle}>Customer App</Text>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.heroBg }]} edges={['top']}>
+      <ScreenHeader title="ParkWise" subtitle="Customer App" hero />
 
-          {!isConfigured && (
-            <View style={styles.configWarning}>
-              <Text style={styles.configWarningText}>⚠️ Supabase is not configured</Text>
-              <Text style={styles.configWarningSubtext}>
-                Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env file
-              </Text>
-            </View>
-          )}
+      <KeyboardAvoidingView
+        style={[styles.flex, { backgroundColor: colors.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <Card style={styles.card}>
+            <Text style={[typeToken('title', textScale), { color: colors.text }]}>Welcome back</Text>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email or Phone</Text>
-            <TextInput
-              style={errors.identifier ? [styles.input, styles.inputError] : styles.input}
-              placeholder="juan@example.com or 09123456789"
-              placeholderTextColor="#9CA3AF"
+            {!isConfigured ? (
+              <View
+                style={[styles.banner, { backgroundColor: colors.dangerTint, borderColor: colors.danger }]}
+                accessibilityRole="alert"
+              >
+                <Ionicons name="alert-circle" size={20} color={colors.danger} />
+                <View style={styles.bannerBody}>
+                  <Text style={[typeToken('bodyStrong', textScale), { color: colors.danger }]}>
+                    Supabase is not configured
+                  </Text>
+                  <Text style={[typeToken('small', textScale), { color: colors.danger }]}>
+                    Please set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in your .env
+                    file
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {formMessage ? (
+              <View
+                style={[styles.banner, { backgroundColor: bannerTone.bg, borderColor: bannerTone.fg }]}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Ionicons name={bannerTone.icon} size={20} color={bannerTone.fg} />
+                <View style={styles.bannerBody}>
+                  <Text style={[typeToken('small', textScale), { color: bannerTone.fg }]}>
+                    {formMessage.text}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            <TextField
+              label="Email or Phone"
               value={identifier}
               onChangeText={setIdentifier}
+              placeholder="juan@example.com or 09123456789"
               autoCapitalize="none"
               keyboardType="email-address"
               editable={!loading}
+              leadingIcon="mail-outline"
+              invalid={!!errors.identifier}
+              message={errors.identifier}
             />
-            {errors.identifier && <Text style={styles.errorText}>{errors.identifier}</Text>}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={errors.password ? [styles.input, styles.passwordInput, styles.inputError] : [styles.input, styles.passwordInput]}
-                placeholder="Enter password"
-                placeholderTextColor="#9CA3AF"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                editable={!loading}
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPassword(!showPassword)}
+            <TextField
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Enter password"
+              secureTextEntry
+              editable={!loading}
+              leadingIcon="lock-closed-outline"
+              invalid={!!errors.password}
+              message={errors.password}
+            />
+
+            <View style={styles.row}>
+              <Pressable
+                onPress={() => setRememberMe((value) => !value)}
+                disabled={loading}
+                accessibilityRole="checkbox"
+                accessibilityLabel="Remember me"
+                accessibilityState={{ checked: rememberMe, disabled: loading }}
+                style={styles.remember}
               >
-                <Text style={styles.eyeText}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
-              </TouchableOpacity>
+                <View
+                  style={[
+                    styles.checkbox,
+                    {
+                      borderColor: rememberMe ? colors.navy : colors.borderStrong,
+                      backgroundColor: rememberMe ? colors.navy : 'transparent',
+                    },
+                  ]}
+                >
+                  {rememberMe ? (
+                    <Ionicons name="checkmark" size={15} color={colors.textOnDark} />
+                  ) : null}
+                </View>
+                <Text style={[typeToken('body', textScale), { color: colors.text }]}>Remember me</Text>
+              </Pressable>
+
+              <Button
+                label="Forgot Password?"
+                variant="ghost"
+                fullWidth={false}
+                disabled={loading}
+                onPress={() => setShowResetModal(true)}
+                accessibilityHint="Opens password reset"
+              />
             </View>
-            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-          </View>
 
-          <View style={styles.row}>
-            <TouchableOpacity
-              style={styles.toggleContainer}
-              onPress={() => setRememberMe(!rememberMe)}
-              disabled={loading}
-            >
-              <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                {rememberMe && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={styles.toggleLabel}>Remember me</Text>
-            </TouchableOpacity>
+            <Button
+              label="Sign In"
+              size="lg"
+              loading={loading}
+              onPress={handleLogin}
+              accessibilityHint="Signs you in with the email or phone and password above"
+            />
 
-            <TouchableOpacity
-              onPress={() => setShowResetModal(true)}
-              disabled={loading}
-            >
-              <Text style={styles.link}>Forgot Password?</Text>
-            </TouchableOpacity>
-          </View>
+            {biometricAvailable ? (
+              <Button
+                label="Use Biometric Login"
+                variant="secondary"
+                icon="finger-print-outline"
+                disabled={loading}
+                onPress={handleBiometricLogin}
+              />
+            ) : null}
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? 'Signing in...' : 'Sign In'}
-            </Text>
-          </TouchableOpacity>
+            <Button
+              label="Don't have an account? Sign Up"
+              variant="ghost"
+              onPress={() => navigation.navigate('Registration')}
+              accessibilityHint="Opens the account registration screen"
+            />
+          </Card>
 
-          {biometricAvailable && (
-            <TouchableOpacity
-              style={styles.biometricButton}
-              onPress={handleBiometricLogin}
-              disabled={loading}
-            >
-              <Text style={styles.biometricButtonText}>👆 Use Biometric Login</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate('Registration')}
-          >
-            <Text style={styles.linkText}>Don't have an account? Sign Up</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.footer}>
+          <Text style={[typeToken('small', textScale), styles.footer, { color: colors.textMuted }]}>
             For customers only. Attendants should use the desktop console.
           </Text>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-      {/* Forgot Password Modal */}
-      {showResetModal && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modal}>
-            <Text style={styles.modalTitle}>Reset Password</Text>
-            <Text style={styles.modalSubtitle}>Enter your email to receive a reset link</Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="juan@example.com"
-              placeholderTextColor="#9CA3AF"
-              value={resetEmail}
-              onChangeText={setResetEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              editable={!resetLoading}
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSecondary]}
+      <BottomSheet
+        visible={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        title="Reset Password"
+        description="Enter your email to receive a reset link"
+        dismissible={!resetLoading}
+        footer={
+          <>
+            <View style={styles.sheetButton}>
+              <Button
+                label="Cancel"
+                variant="secondary"
+                disabled={resetLoading}
                 onPress={() => setShowResetModal(false)}
-                disabled={resetLoading}
-              >
-                <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleResetPassword}
-                disabled={resetLoading}
-              >
-                <Text style={styles.modalButtonTextPrimary}>
-                  {resetLoading ? 'Sending...' : 'Send Reset Link'}
-                </Text>
-              </TouchableOpacity>
+              />
             </View>
-          </View>
-        </View>
-      )}
-    </KeyboardAvoidingView>
+            <View style={styles.sheetButton}>
+              <Button
+                label="Send Reset Link"
+                loading={resetLoading}
+                disabled={resetLoading}
+                onPress={handleResetPassword}
+              />
+            </View>
+          </>
+        }
+      >
+        <TextField
+          label="Email"
+          value={resetEmail}
+          onChangeText={setResetEmail}
+          placeholder="juan@example.com"
+          autoCapitalize="none"
+          keyboardType="email-address"
+          editable={!resetLoading}
+          leadingIcon="mail-outline"
+          invalid={!!errors.resetEmail}
+          message={errors.resetEmail}
+        />
+      </BottomSheet>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
-    backgroundColor: colors.background,
   },
-  scrollContent: {
-    padding: spacing.lg,
-    justifyContent: 'center',
+  flex: {
+    flex: 1,
+  },
+  scroll: {
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
-  title: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.primary,
-    textAlign: 'center',
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.xl,
-  },
-  configWarning: {
-    backgroundColor: '#FEF2F2',
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
     borderWidth: 1,
-    borderColor: '#EF4444',
-    borderRadius: borderRadius.md,
+    borderRadius: radius.md,
     padding: spacing.md,
-    marginBottom: spacing.lg,
   },
-  configWarningText: {
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: '#EF4444',
-    marginBottom: spacing.xs,
-  },
-  configWarningSubtext: {
-    fontSize: fontSize.sm,
-    color: '#7F1D1D',
-  },
-  inputGroup: {
-    marginBottom: spacing.md,
-  },
-  label: {
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    fontSize: fontSize.md,
-    color: colors.text,
-    minHeight: 48,
-  },
-  inputError: {
-    borderColor: '#EF4444',
-  },
-  errorText: {
-    fontSize: fontSize.xs,
-    color: '#EF4444',
-    marginTop: spacing.xs,
-  },
-  passwordContainer: {
-    position: 'relative',
-  },
-  passwordInput: {
-    paddingRight: 48,
-  },
-  eyeIcon: {
-    position: 'absolute',
-    right: spacing.md,
-    top: '50%',
-    marginTop: -12,
-  },
-  eyeText: {
-    fontSize: 20,
+  bannerBody: {
+    flex: 1,
+    gap: spacing.xxs,
   },
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    flexWrap: 'wrap',
   },
-  toggleContainer: {
+  remember: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    minHeight: TOUCH_TARGET,
   },
   checkbox: {
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  checkmark: {
-    color: colors.surface,
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  toggleLabel: {
-    fontSize: fontSize.sm,
-    color: colors.text,
-  },
-  link: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.md,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.surface,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  biometricButton: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.sm,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  biometricButtonText: {
-    color: colors.primary,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: spacing.lg,
-    alignItems: 'center',
-  },
-  linkText: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
   },
   footer: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
     textAlign: 'center',
     marginTop: spacing.lg,
   },
-  modalOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: spacing.lg,
-  },
-  modal: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    width: '100%',
-    maxWidth: 400,
-  },
-  modalTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: 'bold',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  modalSubtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginBottom: spacing.lg,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginTop: spacing.lg,
-  },
-  modalButton: {
+  sheetButton: {
     flex: 1,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  modalButtonSecondary: {
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  modalButtonPrimary: {
-    backgroundColor: colors.primary,
-  },
-  modalButtonTextSecondary: {
-    color: colors.text,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  modalButtonTextPrimary: {
-    color: colors.surface,
-    fontSize: fontSize.md,
-    fontWeight: '600',
   },
 });

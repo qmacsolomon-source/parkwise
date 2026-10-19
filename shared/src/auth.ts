@@ -1,5 +1,6 @@
 import { supabase, isConfigured } from './supabase';
 import { Profile, UserRole } from './types';
+import { PLATE_PATTERN, normalizePlate } from './plate';
 
 export interface AuthState {
   user: any;
@@ -18,6 +19,8 @@ export interface SignupCredentials {
   full_name: string;
   phone: string;
   plate_number?: string;
+  /** Four-wheeled body type, e.g. 'sedan'. Defaults to 'four_wheeled'. */
+  vehicle_type?: string;
   pwd_permit_number?: string | null;
 }
 
@@ -27,34 +30,62 @@ export const authService = {
     if (!supabase || !isConfigured) {
       throw new Error('Supabase is not configured. Please check your environment variables.');
     }
+
+    // The plate travels as sign-up metadata so the database's
+    // handle_new_user() trigger can create the profile (role always
+    // 'customer') and the customer's first vehicle in one transaction.
+    //
+    // `source: 'mobile'` is what arms that trigger: it is written to only
+    // create a profile for sign-ups that come from this app, so it can never
+    // interfere with the staff accounts the desktop console creates through
+    // its own sign-up + profile-update flow.
+    const metadata: Record<string, string> = {
+      source: 'mobile',
+      full_name: credentials.full_name,
+      phone: credentials.phone,
+    };
+    if (credentials.plate_number) {
+      metadata.plate_number = normalizePlate(credentials.plate_number);
+      metadata.vehicle_type = credentials.vehicle_type ?? 'four_wheeled';
+    }
+    if (credentials.pwd_permit_number) {
+      metadata.pwd_permit_number = credentials.pwd_permit_number;
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email: credentials.email,
       password: credentials.password,
       options: {
-        data: {
-          full_name: credentials.full_name,
-          phone: credentials.phone,
-        },
+        data: metadata,
         emailRedirectTo: undefined,
       },
     });
 
     if (error) throw error;
 
-    // Database trigger handle_new_user() will create the profile with role='customer'
-    // After signup, insert the customer's vehicle if plate number provided
-    if (data.user && credentials.plate_number) {
+    // Best-effort fallback for a database where handle_new_user() has not
+    // been installed yet. It already exists, is ignored on a duplicate, and
+    // a failure here must never fail the sign-up itself. Same normalisation
+    // as the metadata above, so both paths produce the same plate.
+    const fallbackPlate = normalizePlate(credentials.plate_number);
+    if (data.user && PLATE_PATTERN.test(fallbackPlate)) {
       const { error: vehicleError } = await supabase
         .from('vehicles')
-        .insert({
-          owner_id: data.user.id,
-          plate_number: credentials.plate_number.toUpperCase(),
-          is_pwd: !!credentials.pwd_permit_number,
-        });
+        .upsert(
+          {
+            owner_id: data.user.id,
+            plate_number: fallbackPlate,
+            vehicle_type: credentials.vehicle_type ?? 'four_wheeled',
+            is_default: true,
+          },
+          { onConflict: 'owner_id,plate_number', ignoreDuplicates: true }
+        );
 
-      if (vehicleError) {
-        console.error('Vehicle creation error:', vehicleError);
-        // Don't throw - profile is created, vehicle can be added later
+      if (vehicleError && vehicleError.code !== '23505') {
+        console.warn(
+          'Vehicle creation is normally handled by handle_new_user(); it can be added later from My vehicles.',
+          vehicleError.message
+        );
       }
     }
 
@@ -188,6 +219,60 @@ export const authService = {
     const { error } = await supabase.auth.updateUser({
       password: newPassword,
     });
+    if (error) throw error;
+  },
+
+  /**
+   * Change the password after re-authenticating with the current one. The
+   * current password is checked with a fresh sign-in, so a stolen session
+   * alone cannot lock the real owner out.
+   */
+  async changePassword(currentPassword: string, newPassword: string) {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) throw new Error('You need to be signed in to change your password.');
+
+    const { error: reauthError } = await supabase.auth.signInWithPassword({
+      email: user.email,
+      password: currentPassword,
+    });
+    if (reauthError) throw new Error('That current password is not correct.');
+
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  },
+
+  /**
+   * Repair a missing profile row: ensure_my_profile() builds it from the
+   * auth metadata (role always 'customer'). Returns the profile, or null
+   * when the function is not installed yet.
+   */
+  async ensureProfile(): Promise<Profile | null> {
+    if (!supabase || !isConfigured) return null;
+    const { data, error } = await supabase.rpc('ensure_my_profile');
+    if (error) {
+      console.warn('ensure_my_profile is unavailable:', error.message);
+      return null;
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    return (row as Profile) ?? null;
+  },
+
+  /** Submit the customer's own PWD permit number; staff still verify it. */
+  async submitPwdPermit(permitNumber: string): Promise<Profile | null> {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const { data, error } = await supabase.rpc('submit_my_pwd_permit', {
+      p_permit_number: permitNumber,
+    });
+    if (error) throw error;
+    const row = Array.isArray(data) ? data[0] : data;
+    return (row as Profile) ?? null;
+  },
+
+  /** Ask staff to close the account; records an audit entry, deletes nothing. */
+  async requestAccountDeletion(): Promise<void> {
+    if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
+    const { error } = await supabase.rpc('request_my_account_deletion');
     if (error) throw error;
   },
 

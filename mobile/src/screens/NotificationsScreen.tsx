@@ -1,18 +1,36 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Notification } from '@parkwise/shared';
-import { colors, spacing, borderRadius, fontSize } from '../theme';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { useTheme } from '../contexts/AccessibilityContext';
+import { radius, spacing, type as typeToken } from '../theme/tokens';
+import { Card, EmptyState, ScreenHeader, SkeletonList, StatusChip } from '../components/ui';
+import type { ChipTone } from '../components/ui';
+import AppScreen from '../components/AppScreen';
 
 type RootStackParamList = {
-  Dashboard: undefined;
   Notifications: undefined;
+};
+
+interface TypeVisual {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  tone: ChipTone;
+}
+
+const TYPE_VISUAL: Record<string, TypeVisual> = {
+  reservation: { icon: 'calendar-outline', tone: 'brand' },
+  verification: { icon: 'shield-checkmark-outline', tone: 'success' },
+  payment: { icon: 'card-outline', tone: 'info' },
+  penalty: { icon: 'alert-circle-outline', tone: 'danger' },
+  system: { icon: 'megaphone-outline', tone: 'neutral' },
 };
 
 export default function NotificationsScreen() {
   const { profile } = useAuth();
+  const { colors, textScale } = useTheme();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -101,26 +119,6 @@ export default function NotificationsScreen() {
     loadNotifications();
   };
 
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'reservation': return colors.primary;
-      case 'verification': return colors.success;
-      case 'payment': return colors.accent;
-      case 'penalty': return colors.error;
-      default: return colors.textSecondary;
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'reservation': return '🅿️';
-      case 'verification': return '✅';
-      case 'payment': return '💳';
-      case 'penalty': return '⚠️';
-      default: return '📢';
-    }
-  };
-
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -136,173 +134,121 @@ export default function NotificationsScreen() {
     return date.toLocaleDateString();
   };
 
-  if (loading) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.loadingText}>Loading notifications...</Text>
-      </View>
-    );
-  }
+  const toneColors: Record<ChipTone, { bg: string; fg: string }> = {
+    success: { bg: colors.successTint, fg: colors.success },
+    warning: { bg: colors.warningTint, fg: colors.warning },
+    danger: { bg: colors.dangerTint, fg: colors.danger },
+    info: { bg: colors.infoTint, fg: colors.info },
+    neutral: { bg: colors.neutralTint, fg: colors.neutral },
+    brand: { bg: colors.tealTint, fg: colors.tealDark },
+  };
+
+  const unreadCount = notifications.filter(n => !n.is_read).length;
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Notifications</Text>
-          <Text style={styles.headerCount}>
-            {notifications.filter(n => !n.is_read).length} unread
-          </Text>
-        </View>
+    <AppScreen
+      header={
+        <ScreenHeader
+          title="Notifications"
+          subtitle={unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+          onBack={() => navigation.goBack()}
+        />
+      }
+      refreshing={refreshing}
+      onRefresh={onRefresh}
+    >
+      {loading ? (
+        <SkeletonList rows={4} />
+      ) : notifications.length === 0 ? (
+        <EmptyState
+          icon="notifications-off-outline"
+          title="No notifications"
+          message="You're all caught up. We'll let you know about important updates."
+        />
+      ) : (
+        notifications.map(notification => {
+          const visual = TYPE_VISUAL[notification.type] ?? TYPE_VISUAL.system;
+          const { bg, fg } = toneColors[visual.tone];
+          const unread = !notification.is_read;
+          const relativeTime = formatDate(notification.created_at);
 
-        {notifications.length === 0 ? (
-          <View style={styles.emptyCard}>
-            <Text style={styles.emptyIcon}>🔔</Text>
-            <Text style={styles.emptyTitle}>No Notifications</Text>
-            <Text style={styles.emptyMessage}>
-              You're all caught up! We'll notify you about important updates.
-            </Text>
-          </View>
-        ) : (
-          notifications.map(notification => (
-            <TouchableOpacity
+          return (
+            <Card
               key={notification.id}
-              style={[
-                styles.notificationCard,
-                !notification.is_read && styles.unreadCard,
-              ]}
-              onPress={() => !notification.is_read && markAsRead(notification.id)}
-              activeOpacity={0.7}
+              style={styles.card}
+              onPress={unread ? () => markAsRead(notification.id) : undefined}
+              accessibilityLabel={`${unread ? 'Unread. ' : ''}${notification.title}. ${
+                notification.body
+              }. ${relativeTime}`}
+              accessibilityHint={unread ? 'Marks this notification as read' : undefined}
             >
-              <View style={styles.notificationHeader}>
-                <View style={[styles.typeBadge, { backgroundColor: getTypeColor(notification.type) }]}>
-                  <Text style={styles.typeIcon}>{getTypeIcon(notification.type)}</Text>
+              <View style={styles.row}>
+                <View
+                  style={[styles.iconBubble, { backgroundColor: bg }]}
+                  accessible={false}
+                  importantForAccessibility="no"
+                >
+                  <Ionicons name={visual.icon} size={20} color={fg} />
                 </View>
-                <Text style={styles.notificationTime}>{formatDate(notification.created_at)}</Text>
+
+                <View style={styles.body}>
+                  <View style={styles.titleRow}>
+                    <Text
+                      style={[typeToken('subtitle', textScale), styles.title, { color: colors.text }]}
+                    >
+                      {notification.title}
+                    </Text>
+                    {unread ? <StatusChip label="New" tone="info" /> : null}
+                  </View>
+
+                  <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
+                    {notification.body}
+                  </Text>
+
+                  <Text
+                    style={[typeToken('small', textScale), styles.time, { color: colors.textMuted }]}
+                  >
+                    {relativeTime}
+                  </Text>
+                </View>
               </View>
-
-              <Text style={styles.notificationTitle}>{notification.title}</Text>
-              <Text style={styles.notificationBody}>{notification.body}</Text>
-
-              {!notification.is_read && <View style={styles.unreadDot} />}
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-    </View>
+            </Card>
+          );
+        })
+      )}
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  scrollContent: {
-    padding: spacing.lg,
-  },
-  loadingText: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.xxl,
-  },
-  header: {
-    marginBottom: spacing.lg,
-  },
-  headerTitle: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.primary,
-  },
-  headerCount: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  emptyCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    alignItems: 'center',
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: spacing.md,
-  },
-  emptyTitle: {
-    fontSize: fontSize.xl,
-    fontWeight: 'bold',
-    color: colors.primary,
+  card: {
     marginBottom: spacing.sm,
   },
-  emptyMessage: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-  },
-  notificationCard: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    position: 'relative',
-  },
-  unreadCard: {
-    backgroundColor: colors.primaryLight,
-    borderWidth: 2,
-    borderColor: colors.accent,
-  },
-  notificationHeader: {
+  row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.sm,
+    gap: spacing.sm,
   },
-  typeBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  iconBubble: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.pill,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  typeIcon: {
-    fontSize: 18,
+  body: {
+    flex: 1,
+    gap: spacing.xxs,
   },
-  notificationTime: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.xs,
   },
-  notificationTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
+  title: {
+    flexShrink: 1,
   },
-  notificationBody: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    lineHeight: 22,
-  },
-  unreadDot: {
-    position: 'absolute',
-    top: spacing.lg,
-    right: spacing.lg,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.accent,
+  time: {
+    marginTop: spacing.xxs,
   },
 });

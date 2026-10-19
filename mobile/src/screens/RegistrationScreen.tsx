@@ -1,17 +1,72 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { useAuth } from '../contexts/AuthContext';
-import { colors, spacing, borderRadius, fontSize } from '../theme';
+import {
+  DimensionValue,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/AccessibilityContext';
+import { radius, spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
+import { Button, Card, TextField, ScreenHeader } from '../components/ui';
+import { DEFAULT_VEHICLE_TYPE, normalizePlate, plateError } from '../services/vehicles';
 
 type RootStackParamList = {
   Login: undefined;
   Registration: undefined;
 };
 
+type FormMessage = { tone: 'error' | 'success'; text: string };
+
+interface CheckboxRowProps {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onPress: () => void;
+}
+
+function CheckboxRow({ label, checked, disabled = false, onPress }: CheckboxRowProps) {
+  const { colors, textScale } = useTheme();
+
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="checkbox"
+      accessibilityLabel={label}
+      accessibilityState={{ checked, disabled }}
+      style={styles.checkRow}
+    >
+      <View
+        style={[
+          styles.checkbox,
+          {
+            borderColor: checked ? colors.navy : colors.borderStrong,
+            backgroundColor: checked ? colors.navy : 'transparent',
+          },
+        ]}
+      >
+        {checked ? <Ionicons name="checkmark" size={15} color={colors.textOnDark} /> : null}
+      </View>
+      <Text style={[typeToken('body', textScale), styles.checkLabel, { color: colors.text }]}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function RegistrationScreen() {
   const { register } = useAuth();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const { colors, textScale } = useTheme();
+
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -25,14 +80,16 @@ export default function RegistrationScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [formMessage, setFormMessage] = useState<FormMessage | null>(null);
 
-  const validatePlateNumber = (plate: string): boolean => {
-    // Philippine plate format: 3 letters + 3 numbers (e.g., ABC123)
-    const plateRegex = /^[A-Z]{3}\d{3}$/;
-    return plateRegex.test(plate.toUpperCase());
+  const tones = {
+    error: { bg: colors.dangerTint, fg: colors.danger, icon: 'alert-circle' as const },
+    success: { bg: colors.successTint, fg: colors.success, icon: 'checkmark-circle' as const },
   };
+  const bannerTone = tones[formMessage?.tone ?? 'error'];
+  const succeeded = formMessage?.tone === 'success';
 
-  const calculatePasswordStrength = (pwd: string): { score: number; label: string; color: string } => {
+  const calculatePasswordStrength = (pwd: string): { score: number; label: string } => {
     let score = 0;
     if (pwd.length >= 8) score++;
     if (pwd.length >= 12) score++;
@@ -41,9 +98,9 @@ export default function RegistrationScreen() {
     if (/\d/.test(pwd)) score++;
     if (/[^a-zA-Z0-9]/.test(pwd)) score++;
 
-    if (score <= 2) return { score, label: 'Weak', color: '#EF4444' };
-    if (score <= 4) return { score, label: 'Medium', color: '#F59E0B' };
-    return { score, label: 'Strong', color: '#10B981' };
+    if (score <= 2) return { score, label: 'Weak' };
+    if (score <= 4) return { score, label: 'Medium' };
+    return { score, label: 'Strong' };
   };
 
   const validateForm = (): boolean => {
@@ -52,20 +109,24 @@ export default function RegistrationScreen() {
     if (!fullName.trim()) newErrors.fullName = 'Full name is required';
     if (!email.trim()) newErrors.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Invalid email format';
-    
+
     if (!phone.trim()) newErrors.phone = 'Phone number is required';
-    else if (!/^\d{11}$/.test(phone.replace(/\D/g, ''))) newErrors.phone = 'Invalid phone number (11 digits)';
-    
+    else if (!/^\d{11}$/.test(phone.replace(/\D/g, '')))
+      newErrors.phone = 'Invalid phone number (11 digits)';
+
     if (!plateNumber.trim()) newErrors.plateNumber = 'Plate number is required';
-    else if (!validatePlateNumber(plateNumber)) newErrors.plateNumber = 'Invalid format (e.g., ABC123)';
-    
+    else {
+      const plateProblem = plateError(plateNumber);
+      if (plateProblem) newErrors.plateNumber = plateProblem;
+    }
+
     if (!password) newErrors.password = 'Password is required';
     else if (password.length < 8) newErrors.password = 'Password must be at least 8 characters';
-    
+
     if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
-    
+
     if (isPwd && !pwdPermitNumber.trim()) newErrors.pwdPermitNumber = 'PWD permit number is required';
-    
+
     if (!acceptTerms) newErrors.terms = 'You must accept the terms and conditions';
 
     setErrors(newErrors);
@@ -76,368 +137,317 @@ export default function RegistrationScreen() {
     if (!validateForm()) return;
 
     setLoading(true);
+    setFormMessage(null);
     try {
       await register({
         full_name: fullName,
         email,
         phone,
-        plate_number: plateNumber.toUpperCase(),
+        plate_number: normalizePlate(plateNumber),
+        vehicle_type: DEFAULT_VEHICLE_TYPE,
         password,
         pwd_permit_number: isPwd ? pwdPermitNumber : null,
       });
-      Alert.alert(
-        'Registration Successful',
-        'Please check your email to verify your account before logging in.',
-        [{ text: 'OK', onPress: () => navigation.navigate('Login') }]
-      );
+      setFormMessage({
+        tone: 'success',
+        text: 'Registration successful. Please check your email to verify your account before logging in.',
+      });
     } catch (error: any) {
-      Alert.alert('Registration Failed', error.message || 'Please try again');
+      setFormMessage({ tone: 'error', text: error.message || 'Please try again' });
     } finally {
       setLoading(false);
     }
   };
 
   const passwordStrength = calculatePasswordStrength(password);
+  const strengthColor =
+    passwordStrength.label === 'Weak'
+      ? colors.danger
+      : passwordStrength.label === 'Medium'
+        ? colors.warning
+        : colors.success;
+  const strengthWidth = `${Math.round((passwordStrength.score / 6) * 100)}%` as DimensionValue;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Create Account</Text>
-          <Text style={styles.subtitle}>Join ParkWise today</Text>
+    <SafeAreaView style={[styles.safe, { backgroundColor: colors.heroBg }]} edges={['top']}>
+      <ScreenHeader
+        title="ParkWise"
+        subtitle="Customer App"
+        hero
+        onBack={() => navigation.navigate('Login')}
+      />
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Full Name</Text>
-            <TextInput
-              style={[styles.input, errors.fullName ? styles.inputError : null]}
-              placeholder="Juan Dela Cruz"
-              placeholderTextColor="#9CA3AF"
+      <KeyboardAvoidingView
+        style={[styles.flex, { backgroundColor: colors.background }]}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+          <Card style={styles.card}>
+            <View style={styles.cardHeading}>
+              <Text style={[typeToken('title', textScale), { color: colors.text }]}>
+                Create Account
+              </Text>
+              <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
+                Join ParkWise today
+              </Text>
+            </View>
+
+            {formMessage ? (
+              <View
+                style={[styles.banner, { backgroundColor: bannerTone.bg, borderColor: bannerTone.fg }]}
+                accessibilityRole="alert"
+                accessibilityLiveRegion="polite"
+              >
+                <Ionicons name={bannerTone.icon} size={20} color={bannerTone.fg} />
+                <View style={styles.bannerBody}>
+                  <Text style={[typeToken('small', textScale), { color: bannerTone.fg }]}>
+                    {formMessage.text}
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            <TextField
+              label="Full Name"
               value={fullName}
               onChangeText={setFullName}
+              placeholder="Juan Dela Cruz"
               autoCapitalize="words"
               editable={!loading}
+              leadingIcon="person-outline"
+              invalid={!!errors.fullName}
+              message={errors.fullName}
             />
-            {errors.fullName && <Text style={styles.errorText}>{errors.fullName}</Text>}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={[styles.input, errors.email ? styles.inputError : null]}
-              placeholder="juan@example.com"
-              placeholderTextColor="#9CA3AF"
+            <TextField
+              label="Email"
               value={email}
               onChangeText={setEmail}
+              placeholder="juan@example.com"
               autoCapitalize="none"
               keyboardType="email-address"
               editable={!loading}
+              leadingIcon="mail-outline"
+              invalid={!!errors.email}
+              message={errors.email}
             />
-            {errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={[styles.input, errors.phone ? styles.inputError : null]}
-              placeholder="09123456789"
-              placeholderTextColor="#9CA3AF"
+            <TextField
+              label="Phone Number"
               value={phone}
               onChangeText={setPhone}
+              placeholder="09123456789"
               keyboardType="phone-pad"
               maxLength={11}
               editable={!loading}
+              leadingIcon="call-outline"
+              invalid={!!errors.phone}
+              message={errors.phone}
             />
-            {errors.phone && <Text style={styles.errorText}>{errors.phone}</Text>}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Plate Number (4-wheeled)</Text>
-            <TextInput
-              style={[styles.input, errors.plateNumber ? styles.inputError : null]}
-              placeholder="ABC123"
-              placeholderTextColor="#9CA3AF"
-              value={plateNumber}
-              onChangeText={(text) => setPlateNumber(text.toUpperCase())}
-              autoCapitalize="characters"
-              maxLength={6}
-              editable={!loading}
-            />
-            {errors.plateNumber && <Text style={styles.errorText}>{errors.plateNumber}</Text>}
-            <Text style={styles.hintText}>Format: 3 letters + 3 numbers (e.g., ABC123)</Text>
-          </View>
+            <View style={styles.fieldGroup}>
+              <TextField
+                label="Plate Number (4-wheeled)"
+                value={plateNumber}
+                onChangeText={(text) => setPlateNumber(text.toUpperCase())}
+                placeholder="ABC1234"
+                autoCapitalize="characters"
+                maxLength={8}
+                editable={!loading}
+                leadingIcon="car-outline"
+                invalid={!!errors.plateNumber}
+                message={errors.plateNumber}
+              />
+              <Text style={[typeToken('small', textScale), { color: colors.textMuted }]}>
+                Format: 3 letters + 3 or 4 numbers (e.g., ABC123 or ABC1234)
+              </Text>
+            </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[styles.input, styles.passwordInput, errors.password ? styles.inputError : null]}
-                placeholder="Enter password"
-                placeholderTextColor="#9CA3AF"
+            <View style={styles.fieldGroup}>
+              <TextField
+                label="Password"
                 value={password}
                 onChangeText={setPassword}
-                secureTextEntry={!showPassword}
+                placeholder="Enter password"
+                secureTextEntry
                 editable={!loading}
+                leadingIcon="lock-closed-outline"
+                invalid={!!errors.password}
+                message={errors.password}
               />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowPassword(!showPassword)}
-              >
-                <Text style={styles.eyeText}>{showPassword ? '👁️' : '👁️‍🗨️'}</Text>
-              </TouchableOpacity>
+              {password ? (
+                <View
+                  style={styles.strength}
+                  accessible
+                  accessibilityLabel={`Password strength: ${passwordStrength.label}`}
+                >
+                  <View style={[styles.strengthTrack, { backgroundColor: colors.surfaceAlt }]}>
+                    <View
+                      style={[
+                        styles.strengthFill,
+                        { width: strengthWidth, backgroundColor: strengthColor },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[typeToken('small', textScale), { color: strengthColor }]}>
+                    Password strength: {passwordStrength.label}
+                  </Text>
+                </View>
+              ) : null}
             </View>
-            {errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
-            {password && (
-              <View style={styles.strengthContainer}>
-                <View style={[styles.strengthBar, { flex: passwordStrength.score / 6, backgroundColor: passwordStrength.color }]} />
-                <Text style={[styles.strengthText, { color: passwordStrength.color }]}>
-                  {passwordStrength.label}
+
+            <TextField
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Confirm password"
+              secureTextEntry
+              editable={!loading}
+              leadingIcon="lock-closed-outline"
+              invalid={!!errors.confirmPassword}
+              message={errors.confirmPassword}
+            />
+
+            <CheckboxRow
+              label="I have a PWD permit"
+              checked={isPwd}
+              disabled={loading}
+              onPress={() => setIsPwd((value) => !value)}
+            />
+
+            {isPwd ? (
+              <View style={styles.fieldGroup}>
+                <TextField
+                  label="PWD Permit Number"
+                  value={pwdPermitNumber}
+                  onChangeText={setPwdPermitNumber}
+                  placeholder="Enter permit number"
+                  autoCapitalize="characters"
+                  editable={!loading}
+                  leadingIcon="card-outline"
+                  invalid={!!errors.pwdPermitNumber}
+                  message={errors.pwdPermitNumber}
+                />
+                <Text style={[typeToken('small', textScale), { color: colors.textMuted }]}>
+                  Your account will be pending until verified by staff
                 </Text>
               </View>
+            ) : null}
+
+            <View style={styles.fieldGroup}>
+              <CheckboxRow
+                label="I accept the Terms and Conditions"
+                checked={acceptTerms}
+                disabled={loading}
+                onPress={() => setAcceptTerms((value) => !value)}
+              />
+              {errors.terms ? (
+                <Text
+                  style={[typeToken('small', textScale), { color: colors.danger }]}
+                  accessibilityLiveRegion="polite"
+                >
+                  {errors.terms}
+                </Text>
+              ) : null}
+            </View>
+
+            {succeeded ? (
+              <Button
+                label="Continue to Sign In"
+                size="lg"
+                onPress={() => navigation.navigate('Login')}
+                accessibilityHint="Goes to the sign in screen"
+              />
+            ) : (
+              <Button
+                label="Create Account"
+                size="lg"
+                loading={loading}
+                onPress={handleRegister}
+                accessibilityHint="Creates your ParkWise account"
+              />
             )}
-          </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Confirm Password</Text>
-            <View style={styles.passwordContainer}>
-              <TextInput
-                style={[styles.input, styles.passwordInput, errors.confirmPassword ? styles.inputError : null]}
-                placeholder="Confirm password"
-                placeholderTextColor="#9CA3AF"
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showConfirmPassword}
-                editable={!loading}
-              />
-              <TouchableOpacity
-                style={styles.eyeIcon}
-                onPress={() => setShowConfirmPassword(!showConfirmPassword)}
-              >
-                <Text style={styles.eyeText}>{showConfirmPassword ? '👁️' : '👁️‍🗨️'}</Text>
-              </TouchableOpacity>
-            </View>
-            {errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
-          </View>
-
-          <View style={styles.inputGroup}>
-            <TouchableOpacity
-              style={styles.toggleContainer}
-              onPress={() => setIsPwd(!isPwd)}
-              disabled={loading}
-            >
-              <View style={[styles.checkbox, isPwd && styles.checkboxChecked]}>
-                {isPwd && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={styles.toggleLabel}>I have a PWD permit</Text>
-            </TouchableOpacity>
-          </View>
-
-          {isPwd && (
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>PWD Permit Number</Text>
-              <TextInput
-                style={[styles.input, errors.pwdPermitNumber ? styles.inputError : null]}
-                placeholder="Enter permit number"
-                placeholderTextColor="#9CA3AF"
-                value={pwdPermitNumber}
-                onChangeText={setPwdPermitNumber}
-                autoCapitalize="characters"
-                editable={!loading}
-              />
-              {errors.pwdPermitNumber && <Text style={styles.errorText}>{errors.pwdPermitNumber}</Text>}
-              <Text style={styles.hintText}>Your account will be pending until verified by staff</Text>
-            </View>
-          )}
-
-          <View style={styles.inputGroup}>
-            <TouchableOpacity
-              style={styles.toggleContainer}
-              onPress={() => setAcceptTerms(!acceptTerms)}
-              disabled={loading}
-            >
-              <View style={[styles.checkbox, acceptTerms && styles.checkboxChecked]}>
-                {acceptTerms && <Text style={styles.checkmark}>✓</Text>}
-              </View>
-              <Text style={styles.toggleLabel}>
-                I accept the <Text style={styles.link}>Terms and Conditions</Text>
-              </Text>
-            </TouchableOpacity>
-            {errors.terms && <Text style={styles.errorText}>{errors.terms}</Text>}
-          </View>
-
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleRegister}
-            disabled={loading}
-          >
-            <Text style={styles.buttonText}>
-              {loading ? 'Creating Account...' : 'Create Account'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate('Login')}
-          >
-            <Text style={styles.linkText}>Already have an account? Sign In</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <Button
+              label="Already have an account? Sign In"
+              variant="ghost"
+              onPress={() => navigation.navigate('Login')}
+              accessibilityHint="Goes to the sign in screen"
+            />
+          </Card>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safe: {
     flex: 1,
-    backgroundColor: colors.background,
   },
-  scrollContent: {
-    padding: spacing.lg,
-    justifyContent: 'center',
+  flex: {
+    flex: 1,
+  },
+  scroll: {
+    paddingHorizontal: spacing.screen,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xl,
   },
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.lg,
-    padding: spacing.xl,
-    shadowColor: colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
-  title: {
-    fontSize: fontSize.xxl,
-    fontWeight: 'bold',
-    color: colors.primary,
-    textAlign: 'center',
-    marginBottom: spacing.xs,
+  cardHeading: {
+    gap: spacing.xxs,
   },
-  subtitle: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: spacing.xl,
-  },
-  inputGroup: {
-    marginBottom: spacing.md,
-  },
-  label: {
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    backgroundColor: colors.background,
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
+    borderRadius: radius.md,
     padding: spacing.md,
-    fontSize: fontSize.md,
-    color: colors.text,
-    minHeight: 48,
   },
-  inputError: {
-    borderColor: '#EF4444',
-  },
-  errorText: {
-    fontSize: fontSize.xs,
-    color: '#EF4444',
-    marginTop: spacing.xs,
-  },
-  hintText: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    marginTop: spacing.xs,
-  },
-  passwordContainer: {
-    position: 'relative',
-  },
-  passwordInput: {
-    paddingRight: 48,
-  },
-  eyeIcon: {
-    position: 'absolute',
-    right: spacing.md,
-    top: '50%',
-    marginTop: -12,
-  },
-  eyeText: {
-    fontSize: 20,
-  },
-  strengthContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.xs,
-    gap: spacing.sm,
-  },
-  strengthBar: {
-    height: 4,
-    borderRadius: 2,
+  bannerBody: {
     flex: 1,
-    backgroundColor: '#E5E7EB',
+    gap: spacing.xxs,
   },
-  strengthText: {
-    fontSize: fontSize.xs,
-    fontWeight: '600',
+  fieldGroup: {
+    gap: spacing.xxs,
   },
-  toggleContainer: {
+  strength: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    marginTop: spacing.xxs,
+  },
+  strengthTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: radius.pill,
+    overflow: 'hidden',
+  },
+  strengthFill: {
+    height: '100%',
+    borderRadius: radius.pill,
+  },
+  checkRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    minHeight: TOUCH_TARGET,
+    paddingTop: spacing.xs,
+  },
+  checkLabel: {
+    flex: 1,
   },
   checkbox: {
-    width: 20,
-    height: 20,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
-    borderColor: colors.border,
-    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  checkmark: {
-    color: colors.surface,
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  toggleLabel: {
-    fontSize: fontSize.sm,
-    color: colors.text,
-  },
-  link: {
-    color: colors.primary,
-    textDecorationLine: 'underline',
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.md,
-    minHeight: 48,
-    justifyContent: 'center',
-  },
-  buttonDisabled: {
-    opacity: 0.6,
-  },
-  buttonText: {
-    color: colors.surface,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-  },
-  linkButton: {
-    marginTop: spacing.lg,
-    alignItems: 'center',
-  },
-  linkText: {
-    fontSize: fontSize.sm,
-    color: colors.primary,
   },
 });
