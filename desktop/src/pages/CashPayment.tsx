@@ -349,17 +349,22 @@ export default function CashPayment() {
     doc.setFontSize(11);
     doc.text('Payment Breakdown', 20, 150);
     doc.setFontSize(10);
-    doc.text(`Base Charge (${rates?.hourly_rate.toFixed(2)}/hr)`, 20, 160);
-    doc.text(`$${calc.baseCharge.toFixed(2)}`, 170, 160, { align: 'right' });
-    
+    // "PHP " rather than the ₱ symbol here specifically - jsPDF's default
+    // base-14 fonts (Helvetica/Times/Courier) use WinAnsiEncoding, which
+    // doesn't include the peso sign, so it would render as a blank/missing
+    // glyph in the actual PDF. The on-screen JSX versions below use the
+    // real ₱ symbol fine, since that's just normal browser text rendering.
+    doc.text(`Base Charge (PHP ${rates?.hourly_rate.toFixed(2)}/hr)`, 20, 160);
+    doc.text(`PHP ${calc.baseCharge.toFixed(2)}`, 170, 160, { align: 'right' });
+
     if (calc.overstaySurcharge > 0) {
       doc.text(`Overstay Surcharge (${calc.overstayHours.toFixed(2)} hrs)`, 20, 167);
-      doc.text(`$${calc.overstaySurcharge.toFixed(2)}`, 170, 167, { align: 'right' });
+      doc.text(`PHP ${calc.overstaySurcharge.toFixed(2)}`, 170, 167, { align: 'right' });
     }
-    
+
     if (calc.penaltyTotal > 0) {
       doc.text(`Penalties`, 20, 174);
-      doc.text(`$${calc.penaltyTotal.toFixed(2)}`, 170, 174, { align: 'right' });
+      doc.text(`PHP ${calc.penaltyTotal.toFixed(2)}`, 170, 174, { align: 'right' });
     }
 
     // Line
@@ -369,7 +374,7 @@ export default function CashPayment() {
     doc.setFontSize(12);
     doc.setFont(undefined, 'bold');
     doc.text('TOTAL', 20, 190);
-    doc.text(`$${calc.total.toFixed(2)}`, 170, 190, { align: 'right' });
+    doc.text(`PHP ${calc.total.toFixed(2)}`, 170, 190, { align: 'right' });
     doc.setFont(undefined, 'normal');
 
     // Payment
@@ -379,9 +384,9 @@ export default function CashPayment() {
     const amountReceivedValue = calc.total + change;
     doc.setFontSize(10);
     doc.text(`Amount Received`, 20, 205);
-    doc.text(`$${amountReceivedValue.toFixed(2)}`, 170, 205, { align: 'right' });
+    doc.text(`PHP ${amountReceivedValue.toFixed(2)}`, 170, 205, { align: 'right' });
     doc.text(`Change`, 20, 212);
-    doc.text(`$${change.toFixed(2)}`, 170, 212, { align: 'right' });
+    doc.text(`PHP ${change.toFixed(2)}`, 170, 212, { align: 'right' });
 
     // Footer
     doc.setFontSize(8);
@@ -548,7 +553,7 @@ export default function CashPayment() {
                   <div className="space-y-2">
                     <div className="flex justify-between text-sm">
                       <span className="text-gray-600">Base Charge</span>
-                      <span className="font-medium">${calculation.baseCharge.toFixed(2)}</span>
+                      <span className="font-medium">₱{calculation.baseCharge.toFixed(2)}</span>
                     </div>
                     
                     {calculation.overstaySurcharge > 0 && (
@@ -556,21 +561,21 @@ export default function CashPayment() {
                         <span className="text-gray-600">
                           Overstay Surcharge ({calculation.overstayHours.toFixed(2)} hrs)
                         </span>
-                        <span className="font-medium text-red-600">${calculation.overstaySurcharge.toFixed(2)}</span>
+                        <span className="font-medium text-red-600">₱{calculation.overstaySurcharge.toFixed(2)}</span>
                       </div>
                     )}
                     
                     {calculation.penaltyTotal > 0 && (
                       <div className="flex justify-between text-sm">
                         <span className="text-gray-600">Penalties</span>
-                        <span className="font-medium text-red-600">${calculation.penaltyTotal.toFixed(2)}</span>
+                        <span className="font-medium text-red-600">₱{calculation.penaltyTotal.toFixed(2)}</span>
                       </div>
                     )}
                     
                     <div className="border-t border-gray-200 pt-2 mt-2">
                       <div className="flex justify-between text-lg font-bold">
                         <span>Total</span>
-                        <span className="text-primary">${calculation.total.toFixed(2)}</span>
+                        <span className="text-primary">₱{calculation.total.toFixed(2)}</span>
                       </div>
                     </div>
                   </div>
@@ -582,7 +587,7 @@ export default function CashPayment() {
                     Amount Received
                   </label>
                   <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₱</span>
                     <input
                       type="number"
                       step="0.01"
@@ -597,7 +602,7 @@ export default function CashPayment() {
                     <div className="mt-2 flex justify-between text-sm">
                       <span className="text-gray-600">Change:</span>
                       <span className={`font-bold ${change >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        ${change.toFixed(2)}
+                        ₱{change.toFixed(2)}
                       </span>
                     </div>
                   )}
@@ -606,8 +611,8 @@ export default function CashPayment() {
                   {(!amountReceived || parseFloat(amountReceived) < calculation.total) && (
                     <p className="text-xs text-amber-600 mt-2">
                       {!amountReceived
-                        ? `Enter the amount received (at least $${calculation.total.toFixed(2)}) to continue.`
-                        : `Amount received must be at least $${calculation.total.toFixed(2)}.`}
+                        ? `Enter the amount received (at least ₱${calculation.total.toFixed(2)}) to continue.`
+                        : `Amount received must be at least ₱${calculation.total.toFixed(2)}.`}
                     </p>
                   )}
                 </div>

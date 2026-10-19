@@ -225,8 +225,10 @@ export default function Reports() {
       `No-Shows: ${reportData.noShows}`,
       `Overstays: ${reportData.overstays}`,
       `Late Cancellations: ${reportData.lateCancellations}`,
-      `Penalties Issued: $${reportData.penaltiesIssued.toFixed(2)}`,
-      `Penalties Collected: $${reportData.penaltiesCollected.toFixed(2)}`,
+      // "PHP " not the ₱ symbol - jsPDF's default font doesn't have that
+      // glyph, see the same note in CashPayment.tsx's receipt generation.
+      `Penalties Issued: PHP ${reportData.penaltiesIssued.toFixed(2)}`,
+      `Penalties Collected: PHP ${reportData.penaltiesCollected.toFixed(2)}`,
       `Alert Count: ${reportData.alertCount}`,
     ];
     summary.forEach(line => {
@@ -439,13 +441,13 @@ export default function Reports() {
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Issued</span>
                     <span className="text-xl font-bold text-red-600">
-                      ${reportData.penaltiesIssued.toFixed(2)}
+                      ₱{reportData.penaltiesIssued.toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-gray-600">Collected</span>
                     <span className="text-xl font-bold text-green-600">
-                      ${reportData.penaltiesCollected.toFixed(2)}
+                      ₱{reportData.penaltiesCollected.toFixed(2)}
                     </span>
                   </div>
                   <div className="flex justify-between items-center pt-4 border-t border-gray-200">
@@ -484,7 +486,7 @@ export default function Reports() {
                 <div className="p-4 bg-gray-50 rounded-lg">
                   <p className="text-sm text-gray-600">Total Revenue</p>
                   <p className="text-2xl font-bold text-primary">
-                    ${reportData.revenue.daily.reduce((sum, d) => sum + d.total, 0).toFixed(2)}
+                    ₱{reportData.revenue.daily.reduce((sum, d) => sum + d.total, 0).toFixed(2)}
                   </p>
                 </div>
               </div>

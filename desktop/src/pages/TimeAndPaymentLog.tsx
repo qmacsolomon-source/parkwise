@@ -427,15 +427,15 @@ export default function TimeAndPaymentLog() {
                       {entry.timeOut ? new Date(entry.timeOut).toLocaleString() : 'N/A'}
                     </td>
                     <td className="px-4 py-3 text-sm">{entry.duration}</td>
-                    <td className="px-4 py-3 text-sm text-right">${entry.baseCharge.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-sm text-right">₱{entry.baseCharge.toFixed(2)}</td>
                     <td className="px-4 py-3 text-sm text-right text-red-600">
-                      {entry.surcharge > 0 ? `$${entry.surcharge.toFixed(2)}` : '-'}
+                      {entry.surcharge > 0 ? `₱${entry.surcharge.toFixed(2)}` : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-right text-red-600">
-                      {entry.penalty > 0 ? `$${entry.penalty.toFixed(2)}` : '-'}
+                      {entry.penalty > 0 ? `₱${entry.penalty.toFixed(2)}` : '-'}
                     </td>
                     <td className="px-4 py-3 text-sm text-right font-bold">
-                      ${entry.total.toFixed(2)}
+                      ₱{entry.total.toFixed(2)}
                     </td>
                     <td className="px-4 py-3 text-sm">{entry.attendant || '-'}</td>
                     <td className="px-4 py-3">
@@ -517,7 +517,7 @@ export default function TimeAndPaymentLog() {
                   </div>
                   <div>
                     <span className="text-gray-600">Total:</span>
-                    <span className="ml-2 font-bold">${selectedEntry.total.toFixed(2)}</span>
+                    <span className="ml-2 font-bold">₱{selectedEntry.total.toFixed(2)}</span>
                   </div>
                   <div>
                     <span className="text-gray-600">Status:</span>
