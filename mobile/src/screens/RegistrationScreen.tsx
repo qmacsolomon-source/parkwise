@@ -74,7 +74,6 @@ export default function RegistrationScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isPwd, setIsPwd] = useState(false);
-  const [pwdPermitNumber, setPwdPermitNumber] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -125,8 +124,6 @@ export default function RegistrationScreen() {
 
     if (password !== confirmPassword) newErrors.confirmPassword = 'Passwords do not match';
 
-    if (isPwd && !pwdPermitNumber.trim()) newErrors.pwdPermitNumber = 'PWD permit number is required';
-
     if (!acceptTerms) newErrors.terms = 'You must accept the terms and conditions';
 
     setErrors(newErrors);
@@ -146,11 +143,13 @@ export default function RegistrationScreen() {
         plate_number: normalizePlate(plateNumber),
         vehicle_type: DEFAULT_VEHICLE_TYPE,
         password,
-        pwd_permit_number: isPwd ? pwdPermitNumber : null,
+        pwd_intent: isPwd,
       });
       setFormMessage({
         tone: 'success',
-        text: 'Registration successful. Please check your email to verify your account before logging in.',
+        text: isPwd
+          ? 'Registration successful. Please check your email to verify your account before logging in. Since you indicated you have a PWD permit, you\'ll be asked to complete verification (permit number and photo) in Settings the first time you log in.'
+          : 'Registration successful. Please check your email to verify your account before logging in.',
       });
     } catch (error: any) {
       setFormMessage({ tone: 'error', text: error.message || 'Please try again' });
@@ -316,22 +315,10 @@ export default function RegistrationScreen() {
             />
 
             {isPwd ? (
-              <View style={styles.fieldGroup}>
-                <TextField
-                  label="PWD Permit Number"
-                  value={pwdPermitNumber}
-                  onChangeText={setPwdPermitNumber}
-                  placeholder="Enter permit number"
-                  autoCapitalize="characters"
-                  editable={!loading}
-                  leadingIcon="card-outline"
-                  invalid={!!errors.pwdPermitNumber}
-                  message={errors.pwdPermitNumber}
-                />
-                <Text style={[typeToken('small', textScale), { color: colors.textMuted }]}>
-                  Your account will be pending until verified by staff
-                </Text>
-              </View>
+              <Text style={[typeToken('small', textScale), styles.pwdNote, { color: colors.textMuted }]}>
+                You'll complete verification (permit number and photo) in Settings after you log in -
+                your account stays pending until staff verify it.
+              </Text>
             ) : null}
 
             <View style={styles.fieldGroup}>
@@ -415,6 +402,9 @@ const styles = StyleSheet.create({
   },
   fieldGroup: {
     gap: spacing.xxs,
+  },
+  pwdNote: {
+    marginTop: spacing.xxs,
   },
   strength: {
     flexDirection: 'row',

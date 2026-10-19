@@ -80,7 +80,8 @@ SELECT public.generate_booking_code() AS sample_code;
 ## Step 4 — `profile_vehicle_rates_fixes.sql`
 
 Installs `handle_new_user()` + the `on_auth_user_created` trigger, `ensure_my_profile()`,
-the rates data/policy and the vehicle/protection rules.
+the rates data/policy, the vehicle/protection rules, and the private `pwd-permits`
+Storage bucket + `submit_my_pwd_permit()` (permit number + photo) for PWD verification.
 
 **Check it worked** (expect 1 row):
 

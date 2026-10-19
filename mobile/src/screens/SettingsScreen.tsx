@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Switch } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Switch, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
+import * as ImagePicker from 'expo-image-picker';
+import { useNavigation, useRoute, NavigationProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { authService, supabase } from '@parkwise/shared';
+import { authService, supabase, getPwdPermitPhotoUrl } from '@parkwise/shared';
+import { uploadMyPwdPermitPhoto } from '../utils/pwdPermitPhoto';
 
 import AppScreen from '../components/AppScreen';
 import SegmentedControl from '../components/SegmentedControl';
@@ -62,6 +64,8 @@ function messageFor(error: unknown, fallback: string): string {
 
 export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const route = useRoute();
+  const autoOpenPwd = (route.params as { autoOpenPwd?: boolean } | undefined)?.autoOpenPwd;
   const { profile, user, logout, refreshProfile } = useAuth();
   const { showToast } = useToast();
   const {
@@ -98,6 +102,11 @@ export default function SettingsScreen() {
   const [permitNumber, setPermitNumber] = useState('');
   const [pwdBusy, setPwdBusy] = useState(false);
   const [pwdError, setPwdError] = useState<string | null>(null);
+  // A newly-picked photo waiting to be uploaded on Submit - kept separate
+  // from what's already on file so re-opening the sheet doesn't imply a
+  // fresh photo was chosen when it wasn't.
+  const [newPermitPhoto, setNewPermitPhoto] = useState<{ uri: string; base64: string } | null>(null);
+  const [existingPermitPhotoUrl, setExistingPermitPhotoUrl] = useState<string | null>(null);
 
   // --- delete account -----------------------------------------------------
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -269,7 +278,44 @@ export default function SettingsScreen() {
   const openPwdPermit = () => {
     setPermitNumber(profile?.pwd_permit_number ?? '');
     setPwdError(null);
+    setNewPermitPhoto(null);
+    setExistingPermitPhotoUrl(null);
     setPwdOpen(true);
+
+    if (profile?.pwd_permit_photo_path) {
+      getPwdPermitPhotoUrl(profile.pwd_permit_photo_path).then(setExistingPermitPhotoUrl);
+    }
+  };
+
+  // Landed here straight from registration/login because pwd_intent is set
+  // but nothing's been submitted yet - open the sheet once so there's no
+  // extra tap to find it.
+  const autoOpenedPwdRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenPwd && profile && !profile.pwd_permit_number && !autoOpenedPwdRef.current) {
+      autoOpenedPwdRef.current = true;
+      openPwdPermit();
+    }
+  }, [autoOpenPwd, profile]);
+
+  const pickPermitPhoto = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setPwdError('Photo library access is needed to attach a permit photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.6,
+      base64: true,
+      allowsEditing: true,
+    });
+
+    if (!result.canceled && result.assets[0]?.base64) {
+      setNewPermitPhoto({ uri: result.assets[0].uri, base64: result.assets[0].base64 });
+      setPwdError(null);
+    }
   };
 
   const savePwdPermit = async () => {
@@ -281,9 +327,14 @@ export default function SettingsScreen() {
     setPwdBusy(true);
     setPwdError(null);
     try {
-      await authService.submitPwdPermit(permitNumber.trim());
+      let photoPath: string | undefined;
+      if (newPermitPhoto) {
+        photoPath = await uploadMyPwdPermitPhoto(newPermitPhoto.uri, newPermitPhoto.base64);
+      }
+      await authService.submitPwdPermit(permitNumber.trim(), photoPath);
       await refreshProfile();
       setPwdOpen(false);
+      setNewPermitPhoto(null);
       showToast('Permit number submitted for verification.', 'success');
     } catch (error) {
       setPwdError(messageFor(error, 'Could not submit your permit number.'));
@@ -655,6 +706,28 @@ export default function SettingsScreen() {
           invalid={!!pwdError}
           message={pwdError ?? undefined}
         />
+
+        {!profile?.pwd_verified ? (
+          <View style={styles.permitPhotoSection}>
+            <Text style={[typeToken('small', textScale), { color: colors.textMuted }]}>
+              Photo of permit (recommended - helps staff verify it faster)
+            </Text>
+            {newPermitPhoto ? (
+              <Image source={{ uri: newPermitPhoto.uri }} style={styles.permitPhotoPreview} />
+            ) : existingPermitPhotoUrl ? (
+              <Image source={{ uri: existingPermitPhotoUrl }} style={styles.permitPhotoPreview} />
+            ) : null}
+            <Button
+              label={newPermitPhoto || existingPermitPhotoUrl ? 'Change photo' : 'Add photo'}
+              variant="secondary"
+              icon="camera-outline"
+              onPress={pickPermitPhoto}
+              disabled={pwdBusy}
+              style={styles.permitPhotoButton}
+            />
+          </View>
+        ) : null}
+
         {profile?.pwd_verified ? (
           <Text style={[typeToken('small', textScale), styles.sheetNote, { color: colors.success }]}>
             Your permit is already verified. Contact the counter if it needs to change.
@@ -835,6 +908,19 @@ const styles = StyleSheet.create({
   },
   sheetNote: {
     marginTop: spacing.sm,
+  },
+  permitPhotoSection: {
+    marginTop: spacing.md,
+  },
+  permitPhotoPreview: {
+    width: 160,
+    height: 100,
+    borderRadius: radius.md,
+    marginTop: spacing.xs,
+  },
+  permitPhotoButton: {
+    marginTop: spacing.xs,
+    alignSelf: 'flex-start',
   },
   alertRow: {
     flexDirection: 'row',

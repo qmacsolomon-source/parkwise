@@ -105,6 +105,44 @@ the phone calls: `get_floor_plan`, `assign_slot_for_reservation`,
 > from the slot data, not traced from an image, because the repo only has the
 > old 34-bay drawings.
 
+### `04_pwd_permit_photo.sql` — photo evidence for PWD permit verification
+
+Adds a `pwd_permit_photo_path` column on `profiles`, a private `pwd-permits`
+Storage bucket, policies so a customer can only upload/view their own photo
+while staff can view any of them, and replaces `submit_my_pwd_permit()` to
+also accept the uploaded photo's path.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT id, public FROM storage.buckets WHERE id = 'pwd-permits';
+SELECT polname FROM pg_policy
+ WHERE polrelid = 'storage.objects'::regclass AND polname ILIKE '%permit photo%';
+```
+
+Expected: one bucket row with `public = false`, and 4 policy rows.
+
+### `05_pwd_intent.sql` — "do you have a PWD permit?" at sign-up
+
+Registration no longer collects a permit number up front, just a yes/no
+checkbox. Adds `profiles.pwd_intent` and updates `handle_new_user()` +
+`ensure_my_profile()` to read it from sign-up metadata, so the app can send
+that customer straight to Settings on their first login to finish
+verification (number + photo).
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent';
+```
+
+Expected: one row.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -126,6 +164,11 @@ WITH r AS (
   UNION ALL SELECT 'mobile sign-up trigger', COUNT(*)::text, (COUNT(*) = 1) FROM pg_trigger
               WHERE tgname='on_auth_user_created'
   UNION ALL SELECT 'booking_code fixed', 'gen_random_uuid', (pg_get_functiondef('public.generate_booking_code()'::regprocedure) NOT LIKE '%gen_random_bytes%')
+  UNION ALL SELECT 'pwd-permits bucket', COUNT(*)::text, (COUNT(*) = 1) FROM storage.buckets WHERE id = 'pwd-permits'
+  UNION ALL SELECT 'pwd permit photo policies', COUNT(*)::text, (COUNT(*) = 4) FROM pg_policy
+              WHERE polrelid = 'storage.objects'::regclass AND polname ILIKE '%permit photo%'
+  UNION ALL SELECT 'pwd_intent column', COUNT(*)::text, (COUNT(*) = 1) FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -140,6 +183,9 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `floor-plan functions` = **3**
 - `mobile sign-up trigger` = **1**
 - `booking_code fixed` → `ok = true`
+- `pwd-permits bucket` = **1**
+- `pwd permit photo policies` = **4**
+- `pwd_intent column` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

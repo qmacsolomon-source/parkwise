@@ -5,3 +5,4 @@ export * from './plate';
 export * from './slotLayout';
 export * from './floorPlan';
 export * from './floorLayout';
+export * from './pwdPermitPhotos';

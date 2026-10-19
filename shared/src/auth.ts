@@ -21,7 +21,12 @@ export interface SignupCredentials {
   plate_number?: string;
   /** Four-wheeled body type, e.g. 'sedan'. Defaults to 'four_wheeled'. */
   vehicle_type?: string;
-  pwd_permit_number?: string | null;
+  /**
+   * True when the customer checked "I have a PWD permit" at sign-up. This is
+   * intent only, not verification - the actual permit number and photo are
+   * completed afterward in Settings (authService.submitPwdPermit).
+   */
+  pwd_intent?: boolean;
 }
 
 export const authService = {
@@ -39,7 +44,7 @@ export const authService = {
     // create a profile for sign-ups that come from this app, so it can never
     // interfere with the staff accounts the desktop console creates through
     // its own sign-up + profile-update flow.
-    const metadata: Record<string, string> = {
+    const metadata: Record<string, string | boolean> = {
       source: 'mobile',
       full_name: credentials.full_name,
       phone: credentials.phone,
@@ -48,8 +53,8 @@ export const authService = {
       metadata.plate_number = normalizePlate(credentials.plate_number);
       metadata.vehicle_type = credentials.vehicle_type ?? 'four_wheeled';
     }
-    if (credentials.pwd_permit_number) {
-      metadata.pwd_permit_number = credentials.pwd_permit_number;
+    if (credentials.pwd_intent) {
+      metadata.pwd_intent = true;
     }
 
     const { data, error } = await supabase.auth.signUp({
@@ -85,7 +90,7 @@ export const authService = {
           phone: credentials.phone,
           role: 'customer',
           status: 'active',
-          pwd_permit_number: credentials.pwd_permit_number || null,
+          pwd_intent: !!credentials.pwd_intent,
           pwd_verified: false,
         }, { onConflict: 'id' });
 
@@ -287,11 +292,17 @@ export const authService = {
     return (row as Profile) ?? null;
   },
 
-  /** Submit the customer's own PWD permit number; staff still verify it. */
-  async submitPwdPermit(permitNumber: string): Promise<Profile | null> {
+  /**
+   * Submit the customer's own PWD permit number and, optionally, the storage
+   * path of a photo of the permit (see uploadMyPwdPermitPhoto in
+   * pwdPermitPhotos.ts). Staff still verify it - this never sets
+   * pwd_verified.
+   */
+  async submitPwdPermit(permitNumber: string, photoPath?: string | null): Promise<Profile | null> {
     if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
     const { data, error } = await supabase.rpc('submit_my_pwd_permit', {
       p_permit_number: permitNumber,
+      p_photo_path: photoPath ?? null,
     });
     if (error) throw error;
     const row = Array.isArray(data) ? data[0] : data;

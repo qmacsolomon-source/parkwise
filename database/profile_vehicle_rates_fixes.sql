@@ -38,6 +38,12 @@ AS $$
 $$;
 
 
+-- pwd_intent: true when the customer checked "I have a PWD permit" at
+-- sign-up (no number collected there any more - that's completed later in
+-- Settings). Read from sign-up metadata by both functions below.
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS pwd_intent BOOLEAN NOT NULL DEFAULT false;
+
 -- ---------------------------------------------------------------------------
 -- 1. ensure_my_profile()
 --    Creates the caller's profile from their auth.users metadata when it is
@@ -52,15 +58,16 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_uid    UUID := auth.uid();
-  v_row    public.profiles;
-  v_meta   JSONB;
-  v_email  TEXT;
-  v_name   TEXT;
-  v_phone  TEXT;
-  v_plate  TEXT;
-  v_type   TEXT;
-  v_pwd    TEXT;
+  v_uid        UUID := auth.uid();
+  v_row        public.profiles;
+  v_meta       JSONB;
+  v_email      TEXT;
+  v_name       TEXT;
+  v_phone      TEXT;
+  v_plate      TEXT;
+  v_type       TEXT;
+  v_pwd        TEXT;
+  v_pwd_intent BOOLEAN;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
@@ -76,13 +83,14 @@ BEGIN
     FROM auth.users u
    WHERE u.id = v_uid;
 
-  v_name  := NULLIF(btrim(COALESCE(v_meta->>'full_name', '')), '');
-  v_phone := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
-  v_type  := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
-  v_pwd   := NULLIF(btrim(COALESCE(v_meta->>'pwd_permit_number', '')), '');
-  v_plate := public.normalize_plate(v_meta->>'plate_number');
+  v_name       := NULLIF(btrim(COALESCE(v_meta->>'full_name', '')), '');
+  v_phone      := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
+  v_type       := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
+  v_pwd        := NULLIF(btrim(COALESCE(v_meta->>'pwd_permit_number', '')), '');
+  v_pwd_intent := COALESCE((v_meta->>'pwd_intent')::boolean, false);
+  v_plate      := public.normalize_plate(v_meta->>'plate_number');
 
-  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number)
+  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number, pwd_intent)
   VALUES (
     v_uid,
     COALESCE(v_name, v_email, 'ParkWise customer'),
@@ -90,7 +98,8 @@ BEGIN
     COALESCE(v_phone, ''),
     'customer',                 -- never taken from metadata
     'active',
-    v_pwd                       -- seeded from the customer's own sign-up form
+    v_pwd,                      -- seeded from the customer's own sign-up form
+    v_pwd_intent
   )
   RETURNING * INTO v_row;
 
@@ -121,14 +130,15 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_meta  JSONB := COALESCE(NEW.raw_user_meta_data, '{}'::jsonb);
-  v_name  TEXT := NULLIF(btrim(COALESCE(NEW.raw_user_meta_data->>'full_name', '')), '');
-  v_phone TEXT := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
-  v_type  TEXT := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
-  v_pwd   TEXT := NULLIF(btrim(COALESCE(v_meta->>'pwd_permit_number', '')), '');
-  v_plate TEXT := public.normalize_plate(v_meta->>'plate_number');
+  v_meta       JSONB := COALESCE(NEW.raw_user_meta_data, '{}'::jsonb);
+  v_name       TEXT := NULLIF(btrim(COALESCE(NEW.raw_user_meta_data->>'full_name', '')), '');
+  v_phone      TEXT := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
+  v_type       TEXT := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
+  v_pwd        TEXT := NULLIF(btrim(COALESCE(v_meta->>'pwd_permit_number', '')), '');
+  v_pwd_intent BOOLEAN := COALESCE((v_meta->>'pwd_intent')::boolean, false);
+  v_plate      TEXT := public.normalize_plate(v_meta->>'plate_number');
 BEGIN
-  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number)
+  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number, pwd_intent)
   VALUES (
     NEW.id,
     COALESCE(v_name, NEW.email, 'ParkWise customer'),
@@ -136,7 +146,8 @@ BEGIN
     COALESCE(v_phone, ''),
     'customer',                 -- never taken from metadata
     'active',
-    v_pwd
+    v_pwd,
+    v_pwd_intent
   )
   ON CONFLICT (id) DO NOTHING;
 
@@ -157,12 +168,52 @@ CREATE TRIGGER on_auth_user_created
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
--- 3. submit_my_pwd_permit(p_permit_number)
---    Lets a customer record (or correct) their own PWD permit number. It
---    ONLY touches pwd_permit_number -- pwd_verified stays FALSE until a
---    staff member verifies it, so a customer can never self-verify.
+-- 3. submit_my_pwd_permit(p_permit_number, p_photo_path)
+--    Lets a customer record (or correct) their own PWD permit number and the
+--    storage path of a photo of the permit. It ONLY touches
+--    pwd_permit_number/pwd_permit_photo_path -- pwd_verified stays FALSE
+--    until a staff member verifies it, so a customer can never self-verify.
+--
+--    pwd_permit_photo_path is a path inside the private 'pwd-permits'
+--    Storage bucket, shaped "<user-id>/permit-<ts>.<ext>". The function only
+--    ever accepts a path inside the caller's own folder, so a customer can
+--    never point their profile at someone else's uploaded photo.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.submit_my_pwd_permit(p_permit_number TEXT)
+ALTER TABLE public.profiles
+  ADD COLUMN IF NOT EXISTS pwd_permit_photo_path TEXT;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('pwd-permits', 'pwd-permits', false)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS "Customers can upload own permit photo" ON storage.objects;
+DROP POLICY IF EXISTS "Customers can update own permit photo" ON storage.objects;
+DROP POLICY IF EXISTS "Customers can view own permit photo" ON storage.objects;
+DROP POLICY IF EXISTS "Staff can view all permit photos" ON storage.objects;
+
+CREATE POLICY "Customers can upload own permit photo" ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'pwd-permits' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY "Customers can update own permit photo" ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (bucket_id = 'pwd-permits' AND (storage.foldername(name))[1] = auth.uid()::text)
+  WITH CHECK (bucket_id = 'pwd-permits' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY "Customers can view own permit photo" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (bucket_id = 'pwd-permits' AND (storage.foldername(name))[1] = auth.uid()::text);
+
+CREATE POLICY "Staff can view all permit photos" ON storage.objects
+  FOR SELECT TO authenticated
+  USING (bucket_id = 'pwd-permits' AND is_staff());
+
+-- Drop the old one-argument signature first - otherwise it coexists as a
+-- separate overload and a call that passes only p_permit_number becomes
+-- ambiguous between the two.
+DROP FUNCTION IF EXISTS public.submit_my_pwd_permit(TEXT);
+
+CREATE OR REPLACE FUNCTION public.submit_my_pwd_permit(p_permit_number TEXT, p_photo_path TEXT DEFAULT NULL)
 RETURNS public.profiles
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -171,13 +222,21 @@ AS $$
 DECLARE
   v_uid UUID := auth.uid();
   v_row public.profiles;
+  v_photo_path TEXT;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
   END IF;
 
+  IF p_photo_path IS NOT NULL AND p_photo_path LIKE (v_uid::text || '/%') THEN
+    v_photo_path := p_photo_path;
+  ELSE
+    v_photo_path := NULL;
+  END IF;
+
   UPDATE public.profiles
-     SET pwd_permit_number = NULLIF(btrim(COALESCE(p_permit_number, '')), '')
+     SET pwd_permit_number = NULLIF(btrim(COALESCE(p_permit_number, '')), ''),
+         pwd_permit_photo_path = COALESCE(v_photo_path, pwd_permit_photo_path)
    WHERE id = v_uid
   RETURNING * INTO v_row;
 
@@ -189,8 +248,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.submit_my_pwd_permit(TEXT) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.submit_my_pwd_permit(TEXT) TO authenticated;
+REVOKE ALL ON FUNCTION public.submit_my_pwd_permit(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.submit_my_pwd_permit(TEXT, TEXT) TO authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 4. request_my_account_deletion()

@@ -25,6 +25,10 @@ export interface Profile {
   status: UserStatus;
   pwd_permit_number: string | null;
   pwd_verified: boolean;
+  /** Storage path of the uploaded permit photo, e.g. "<user-id>/permit-123.jpg". Null if none uploaded. */
+  pwd_permit_photo_path: string | null;
+  /** True when the customer checked "I have a PWD permit" at sign-up, before completing verification in Settings. */
+  pwd_intent: boolean;
   created_at: string;
 }
 

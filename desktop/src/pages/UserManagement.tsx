@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { usePersistedState } from '../hooks/usePersistedState';
-import { supabase } from '@parkwise/shared';
+import { supabase, getPwdPermitPhotoUrl } from '@parkwise/shared';
 import { Profile } from '@parkwise/shared';
 import {
   Users, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
@@ -40,6 +40,8 @@ export default function UserManagement() {
   const [showDisableModal, setShowDisableModal] = useState(false);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
   const [showPwdModal, setShowPwdModal] = useState(false);
+  const [pwdPhotoUrl, setPwdPhotoUrl] = useState<string | null>(null);
+  const [pwdPhotoLoading, setPwdPhotoLoading] = useState(false);
   const [showPenaltyModal, setShowPenaltyModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   
@@ -246,6 +248,19 @@ export default function UserManagement() {
       setError(error.message || 'Failed to reset password');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const openPwdModal = async (user: ProfileWithDetails) => {
+    setSelectedProfile(user);
+    setShowPwdModal(true);
+    setPwdPhotoUrl(null);
+
+    if (user.pwd_permit_photo_path) {
+      setPwdPhotoLoading(true);
+      const url = await getPwdPermitPhotoUrl(user.pwd_permit_photo_path);
+      setPwdPhotoUrl(url);
+      setPwdPhotoLoading(false);
     }
   };
 
@@ -646,10 +661,7 @@ export default function UserManagement() {
                           </button>
                           {user.pwd_permit_number && (
                             <button
-                              onClick={() => {
-                                setSelectedProfile(user);
-                                setShowPwdModal(true);
-                              }}
+                              onClick={() => openPwdModal(user)}
                               className="p-1 text-gray-500 hover:text-primary"
                               title="Verify PWD"
                             >
@@ -918,6 +930,20 @@ export default function UserManagement() {
               <div>
                 <label className="text-sm font-medium text-gray-700">Current Status</label>
                 <p className="text-gray-900">{selectedProfile.pwd_verified ? 'Verified' : 'Pending'}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Permit Photo</label>
+                {pwdPhotoLoading ? (
+                  <p className="text-gray-500 text-sm mt-1">Loading photo...</p>
+                ) : pwdPhotoUrl ? (
+                  <img
+                    src={pwdPhotoUrl}
+                    alt="Submitted PWD permit"
+                    className="mt-2 rounded-lg border border-gray-200 max-h-56 w-full object-contain bg-gray-50"
+                  />
+                ) : (
+                  <p className="text-gray-500 text-sm mt-1">No photo submitted.</p>
+                )}
               </div>
             </div>
             <div className="flex gap-3 mt-6">

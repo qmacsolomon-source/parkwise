@@ -12,7 +12,7 @@ interface AuthContextType extends AuthState {
     plate_number: string;
     vehicle_type?: string;
     password: string;
-    pwd_permit_number?: string | null;
+    pwd_intent?: boolean;
   }) => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
 }
@@ -62,7 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           authService.getSession(),
           new Promise<null>((resolve) =>
             setTimeout(() => {
-              console.warn(
+              // Expected, non-fatal fallback - console.log instead of
+              // console.warn so it doesn't pop up an on-screen LogBox.
+              console.log(
                 `[startup] session check timed out after ${SESSION_TIMEOUT_MS}ms, falling back to signed-out`
               );
               resolve(null);
@@ -136,10 +138,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     plate_number: string;
     vehicle_type?: string;
     password: string;
-    pwd_permit_number?: string | null;
+    pwd_intent?: boolean;
   }) => {
     const result = await authService.register(data);
-    if (result.user) {
+    // signUp() always returns a user the moment the account is created, but
+    // only returns a session when email confirmation is off. Without a
+    // session there is no access token, so treating `user` alone as "signed
+    // in" here would switch to the main app with no authenticated session -
+    // every request after that (profile/vehicle creation included) would be
+    // rejected by RLS. Leave state untouched and let the registration screen's
+    // own "check your email" messaging handle this case instead.
+    if (result.user && result.session) {
       const profile = await resolveProfile(result.user.id);
       setState({
         user: result.user,

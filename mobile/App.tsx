@@ -69,15 +69,29 @@ function AppRoutes() {
     );
   }
 
+  // A customer who checked "I have a PWD permit" at sign-up but hasn't
+  // submitted a permit number yet is sent straight to Settings (with the PWD
+  // sheet already open) instead of Dashboard, so they finish verification
+  // before using the rest of the app. Once they submit a number this stops
+  // being true, even while staff verification is still pending.
+  const needsPwdSetup = !!profile?.pwd_intent && !profile?.pwd_permit_number;
+
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName={needsPwdSetup ? 'Settings' : 'Dashboard'}
+      screenOptions={{ headerShown: false }}
+    >
       <Stack.Screen name="Dashboard" component={DashboardScreen} />
       <Stack.Screen name="Reservation" component={ReservationScreen} />
       <Stack.Screen name="Timer" component={TimerScreen} />
       <Stack.Screen name="Wayfinding" component={WayfindingScreen} />
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="History" component={HistoryScreen} />
-      <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen
+        name="Settings"
+        component={SettingsScreen}
+        initialParams={needsPwdSetup ? { autoOpenPwd: true } : undefined}
+      />
       <Stack.Screen name="MyVehicles" component={MyVehiclesScreen} />
       <Stack.Screen name="Help" component={HelpScreen} />
     </Stack.Navigator>
