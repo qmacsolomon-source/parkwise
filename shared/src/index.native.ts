@@ -4,3 +4,4 @@ export * from './auth';
 export * from './plate';
 export * from './floorPlan';
 export * from './floorLayout';
+export * from './pwdPermitPhotos';
