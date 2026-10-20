@@ -53,7 +53,7 @@ function AppRoutes() {
 
   if (!user) {
     return (
-      <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
+      <Stack.Navigator key="auth" initialRouteName="Login" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Registration" component={RegistrationScreen} />
       </Stack.Navigator>
@@ -63,7 +63,7 @@ function AppRoutes() {
   // Role-based routing
   if (profile?.role === 'attendant' || profile?.role === 'admin') {
     return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator key="access-denied" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="AccessDenied" component={AccessDeniedScreen} />
       </Stack.Navigator>
     );
@@ -77,7 +77,13 @@ function AppRoutes() {
   const needsPwdSetup = !!profile?.pwd_intent && !profile?.pwd_permit_number;
 
   return (
+    // initialRouteName only applies when a navigator first mounts - without a
+    // key that changes here, React treats this as the SAME navigator
+    // instance across the login transition (same type, same tree position)
+    // and never re-applies it, always landing on the first declared screen
+    // instead. The key forces a fresh mount whenever this flips.
     <Stack.Navigator
+      key={needsPwdSetup ? 'customer-pwd-setup' : 'customer'}
       initialRouteName={needsPwdSetup ? 'Settings' : 'Dashboard'}
       screenOptions={{ headerShown: false }}
     >
