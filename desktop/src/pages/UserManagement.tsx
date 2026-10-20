@@ -600,11 +600,17 @@ export default function UserManagement() {
                       </td>
                       <td className="py-3 px-4">
                         {user.pwd_permit_number ? (
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            user.pwd_verified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-                          }`}>
+                          <button
+                            onClick={() => openPwdModal(user)}
+                            className={`px-2 py-1 text-xs font-medium rounded-full cursor-pointer hover:ring-2 hover:ring-offset-1 transition-shadow ${
+                              user.pwd_verified
+                                ? 'bg-green-100 text-green-800 hover:ring-green-300'
+                                : 'bg-yellow-100 text-yellow-800 hover:ring-yellow-300'
+                            }`}
+                            title="Click to review PWD permit"
+                          >
                             {user.pwd_verified ? 'Verified' : 'Pending'}
-                          </span>
+                          </button>
                         ) : (
                           <span className="text-gray-400 text-xs">-</span>
                         )}
@@ -659,15 +665,6 @@ export default function UserManagement() {
                           >
                             <Shield size={16} />
                           </button>
-                          {user.pwd_permit_number && (
-                            <button
-                              onClick={() => openPwdModal(user)}
-                              className="p-1 text-gray-500 hover:text-primary"
-                              title="Verify PWD"
-                            >
-                              <Shield size={16} />
-                            </button>
-                          )}
                           {user.unpaid_penalty_balance > 0 && (
                             <button
                               onClick={() => {
