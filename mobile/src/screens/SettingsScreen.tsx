@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Switch, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { useNavigation, useRoute, NavigationProp } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, NavigationProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService, supabase, getPwdPermitPhotoUrl } from '@parkwise/shared';
 import { uploadMyPwdPermitPhoto } from '../utils/pwdPermitPhoto';
@@ -67,6 +67,15 @@ export default function SettingsScreen() {
   const route = useRoute();
   const autoOpenPwd = (route.params as { autoOpenPwd?: boolean } | undefined)?.autoOpenPwd;
   const { profile, user, logout, refreshProfile } = useAuth();
+
+  // Staff actions (PWD verification, etc.) happen outside this app, so the
+  // cached profile only catches up when refetched - do that every time this
+  // screen gains focus, not just after an action taken here.
+  useFocusEffect(
+    useCallback(() => {
+      refreshProfile();
+    }, [refreshProfile])
+  );
   const { showToast } = useToast();
   const {
     colors,

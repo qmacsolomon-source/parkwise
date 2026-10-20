@@ -273,9 +273,11 @@ export default function UserManagement() {
     setError('');
     
     try {
+      const newStatus = !selectedProfile.pwd_verified;
+
       await supabase
         .from('profiles')
-        .update({ pwd_verified: !selectedProfile.pwd_verified })
+        .update({ pwd_verified: newStatus })
         .eq('id', selectedProfile.id);
 
       // Log to audit_log
@@ -285,9 +287,21 @@ export default function UserManagement() {
         action: 'pwd_verification_changed',
         details: {
           target_user_id: selectedProfile.id,
-          new_status: !selectedProfile.pwd_verified,
+          new_status: newStatus,
           permit_number: selectedProfile.pwd_permit_number,
         },
+      });
+
+      // Let the customer know - their app only picks this up next time it
+      // refetches the profile (e.g. opening Settings), but the notification
+      // itself appears immediately.
+      await supabase.from('notifications').insert({
+        user_id: selectedProfile.id,
+        title: newStatus ? 'PWD Permit Verified' : 'PWD Permit Verification Removed',
+        body: newStatus
+          ? 'Your PWD permit has been verified. PWD bays will now be offered to you first.'
+          : 'Your PWD permit verification has been removed. Contact the counter if this is unexpected.',
+        type: 'verification',
       });
 
       setSuccess(true);
