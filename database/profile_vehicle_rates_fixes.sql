@@ -186,6 +186,16 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('pwd-permits', 'pwd-permits', false)
 ON CONFLICT (id) DO NOTHING;
 
+-- storage.buckets has RLS enabled by default too - without this, an
+-- authenticated user's upload fails with "Bucket not found" even though the
+-- bucket row exists, because the Storage API's own existence check (run
+-- under that user's RLS context) can't see it either.
+DROP POLICY IF EXISTS "Authenticated can see the pwd-permits bucket" ON storage.buckets;
+
+CREATE POLICY "Authenticated can see the pwd-permits bucket" ON storage.buckets
+  FOR SELECT TO authenticated
+  USING (id = 'pwd-permits');
+
 DROP POLICY IF EXISTS "Customers can upload own permit photo" ON storage.objects;
 DROP POLICY IF EXISTS "Customers can update own permit photo" ON storage.objects;
 DROP POLICY IF EXISTS "Customers can view own permit photo" ON storage.objects;

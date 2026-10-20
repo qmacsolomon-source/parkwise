@@ -7,11 +7,15 @@
 --     1. profiles.pwd_permit_photo_path (text, nullable) - the storage path
 --        of the customer's uploaded permit photo.
 --     2. A PRIVATE 'pwd-permits' Storage bucket (not publicly readable).
---     3. Storage policies: a customer may upload/update/view objects only
---        under their own "<their-user-id>/..." folder inside the bucket;
---        staff (is_staff()) may view any object in the bucket so they can
---        verify it, but cannot upload to it.
---     4. submit_my_pwd_permit() is replaced to also accept an optional photo
+--     3. A SELECT policy on storage.buckets itself - RLS is on by default
+--        there too, and without this an authenticated user's upload fails
+--        with "Bucket not found" even though the bucket row exists, because
+--        the Storage API's own existence check can't see it either.
+--     4. storage.objects policies: a customer may upload/update/view objects
+--        only under their own "<their-user-id>/..." folder inside the
+--        bucket; staff (is_staff()) may view any object so they can verify
+--        it, but cannot upload to it.
+--     5. submit_my_pwd_permit() is replaced to also accept an optional photo
 --        path. It only ever stores a path that starts with the caller's own
 --        user id, so a customer can never point their profile at someone
 --        else's uploaded photo even by passing an arbitrary string.
@@ -25,6 +29,9 @@
 --    WHERE table_schema='public' AND table_name='profiles'
 --      AND column_name='pwd_permit_photo_path';
 --   SELECT id, public FROM storage.buckets WHERE id = 'pwd-permits';
+--   SELECT polname FROM pg_policy
+--    WHERE polrelid = 'storage.buckets'::regclass AND polname ILIKE '%pwd-permits bucket%';
+--   -- expect 1 row
 --   SELECT polname FROM pg_policy
 --    WHERE polrelid = 'storage.objects'::regclass AND polname ILIKE '%permit photo%';
 --   -- expect 4 rows: upload, update, view-own, staff-view-all
@@ -48,8 +55,22 @@ VALUES ('pwd-permits', 'pwd-permits', false)
 ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
--- 3. Storage policies. Objects are stored as "<user-id>/permit-<ts>.<ext>",
---    so (storage.foldername(name))[1] is the owning user's id.
+-- 3. storage.buckets also has RLS enabled by default. Without a SELECT
+--    policy here, the Storage API's own "does this bucket exist" check comes
+--    back empty for an ordinary authenticated user (even though the row is
+--    visible to an admin in the SQL Editor, which bypasses RLS) - the upload
+--    then fails with a "Bucket not found" error despite the bucket existing.
+-- ---------------------------------------------------------------------------
+DROP POLICY IF EXISTS "Authenticated can see the pwd-permits bucket" ON storage.buckets;
+
+CREATE POLICY "Authenticated can see the pwd-permits bucket" ON storage.buckets
+  FOR SELECT TO authenticated
+  USING (id = 'pwd-permits');
+
+-- ---------------------------------------------------------------------------
+-- 4. storage.objects policies. Objects are stored as
+--    "<user-id>/permit-<ts>.<ext>", so (storage.foldername(name))[1] is the
+--    owning user's id.
 -- ---------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Customers can upload own permit photo" ON storage.objects;
 DROP POLICY IF EXISTS "Customers can update own permit photo" ON storage.objects;
@@ -74,7 +95,7 @@ CREATE POLICY "Staff can view all permit photos" ON storage.objects
   USING (bucket_id = 'pwd-permits' AND is_staff());
 
 -- ---------------------------------------------------------------------------
--- 4. submit_my_pwd_permit(): now also takes the uploaded photo's storage
+-- 5. submit_my_pwd_permit(): now also takes the uploaded photo's storage
 --    path. pwd_verified is never touched here, so nobody can self-verify.
 --    The old one-argument version from 02 is dropped first - otherwise it
 --    coexists as a separate overload and a call that passes only

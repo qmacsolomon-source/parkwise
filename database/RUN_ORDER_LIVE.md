@@ -110,7 +110,11 @@ the phone calls: `get_floor_plan`, `assign_slot_for_reservation`,
 Adds a `pwd_permit_photo_path` column on `profiles`, a private `pwd-permits`
 Storage bucket, policies so a customer can only upload/view their own photo
 while staff can view any of them, and replaces `submit_my_pwd_permit()` to
-also accept the uploaded photo's path.
+also accept the uploaded photo's path. Also adds a SELECT policy on
+`storage.buckets` itself (RLS is on there by default too) - without it,
+uploads fail with "Bucket not found" even though the bucket row exists,
+because the Storage API's own existence check runs under the calling user's
+RLS context and can't see it either.
 
 **Expected result:** `Success. No rows returned`.
 
@@ -119,10 +123,12 @@ Quick check (paste on its own):
 ```sql
 SELECT id, public FROM storage.buckets WHERE id = 'pwd-permits';
 SELECT polname FROM pg_policy
+ WHERE polrelid = 'storage.buckets'::regclass AND polname ILIKE '%pwd-permits bucket%';
+SELECT polname FROM pg_policy
  WHERE polrelid = 'storage.objects'::regclass AND polname ILIKE '%permit photo%';
 ```
 
-Expected: one bucket row with `public = false`, and 4 policy rows.
+Expected: one bucket row with `public = false`, one bucket-policy row, and 4 object-policy rows.
 
 ### `05_pwd_intent.sql` — "do you have a PWD permit?" at sign-up
 
@@ -167,6 +173,8 @@ WITH r AS (
   UNION ALL SELECT 'pwd-permits bucket', COUNT(*)::text, (COUNT(*) = 1) FROM storage.buckets WHERE id = 'pwd-permits'
   UNION ALL SELECT 'pwd permit photo policies', COUNT(*)::text, (COUNT(*) = 4) FROM pg_policy
               WHERE polrelid = 'storage.objects'::regclass AND polname ILIKE '%permit photo%'
+  UNION ALL SELECT 'pwd-permits bucket policy', COUNT(*)::text, (COUNT(*) = 1) FROM pg_policy
+              WHERE polrelid = 'storage.buckets'::regclass AND polname ILIKE '%pwd-permits bucket%'
   UNION ALL SELECT 'pwd_intent column', COUNT(*)::text, (COUNT(*) = 1) FROM information_schema.columns
               WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
 )
@@ -185,6 +193,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `booking_code fixed` → `ok = true`
 - `pwd-permits bucket` = **1**
 - `pwd permit photo policies` = **4**
+- `pwd-permits bucket policy` = **1**
 - `pwd_intent column` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
