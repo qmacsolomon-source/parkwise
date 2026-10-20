@@ -42,6 +42,7 @@ export default function UserManagement() {
   const [showPwdModal, setShowPwdModal] = useState(false);
   const [pwdPhotoUrl, setPwdPhotoUrl] = useState<string | null>(null);
   const [pwdPhotoLoading, setPwdPhotoLoading] = useState(false);
+  const [showPwdPhotoZoom, setShowPwdPhotoZoom] = useState(false);
   const [showPenaltyModal, setShowPenaltyModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   
@@ -255,6 +256,7 @@ export default function UserManagement() {
     setSelectedProfile(user);
     setShowPwdModal(true);
     setPwdPhotoUrl(null);
+    setShowPwdPhotoZoom(false);
 
     if (user.pwd_permit_photo_path) {
       setPwdPhotoLoading(true);
@@ -933,11 +935,17 @@ export default function UserManagement() {
                 {pwdPhotoLoading ? (
                   <p className="text-gray-500 text-sm mt-1">Loading photo...</p>
                 ) : pwdPhotoUrl ? (
-                  <img
-                    src={pwdPhotoUrl}
-                    alt="Submitted PWD permit"
-                    className="mt-2 rounded-lg border border-gray-200 max-h-56 w-full object-contain bg-gray-50"
-                  />
+                  <button
+                    onClick={() => setShowPwdPhotoZoom(true)}
+                    className="mt-2 block w-full cursor-zoom-in"
+                    title="Click to view full size"
+                  >
+                    <img
+                      src={pwdPhotoUrl}
+                      alt="Submitted PWD permit"
+                      className="rounded-lg border border-gray-200 max-h-56 w-full object-contain bg-gray-50"
+                    />
+                  </button>
                 ) : (
                   <p className="text-gray-500 text-sm mt-1">No photo submitted.</p>
                 )}
@@ -950,6 +958,29 @@ export default function UserManagement() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* PWD Permit Photo - full-screen zoom */}
+      {showPwdPhotoZoom && pwdPhotoUrl && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-[60] cursor-zoom-out"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowPwdPhotoZoom(false)}
+        >
+          <button
+            onClick={() => setShowPwdPhotoZoom(false)}
+            className="absolute top-6 right-6 text-white hover:text-gray-300"
+            title="Close"
+          >
+            <X size={28} />
+          </button>
+          <img
+            src={pwdPhotoUrl}
+            alt="Submitted PWD permit (full size)"
+            className="max-w-[90vw] max-h-[90vh] object-contain"
+          />
         </div>
       )}
 
