@@ -1,0 +1,132 @@
+<!--
+  Landing page shown after a customer clicks the "confirm your email" link
+  from Supabase. Deploy this anywhere that gives it a public https:// URL
+  (GitHub Pages, Netlify, Vercel, etc.) and set that URL as the project's
+  Site URL in Supabase: Authentication -> URL Configuration -> Site URL.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account Confirmed - ParkWise</title>
+<style>
+  :root {
+    --bg: #F6F8FB;
+    --surface: #FFFFFF;
+    --ink: #0F2A4A;
+    --ink-muted: #5B7088;
+    --line: #E2E8F0;
+    --success: #15803D;
+    --success-tint: #DCFCE7;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0A1D33;
+      --surface: #11263F;
+      --ink: #F2F6FB;
+      --ink-muted: #9FB3C8;
+      --line: #223B57;
+      --success: #4ADE80;
+      --success-tint: #103322;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 380px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 36px 28px 32px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(15, 42, 74, 0.04), 0 12px 32px rgba(15, 42, 74, 0.08);
+  }
+
+  .badge {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 20px;
+    border-radius: 16px;
+    background: var(--success-tint);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .badge svg { width: 30px; height: 30px; }
+  .badge svg path { stroke: var(--success); }
+
+  h1 {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+
+  p {
+    margin: 0;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--ink-muted);
+  }
+
+  .lede { margin-bottom: 22px; }
+
+  .divider {
+    height: 1px;
+    background: var(--line);
+    margin: 22px 0;
+    border: none;
+  }
+
+  .plate {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .plate .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    flex: none;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M5 13l4 4L19 7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+
+    <h1>You're verified</h1>
+    <p class="lede">Your ParkWise account is confirmed. You can close this page and log in from the app.</p>
+
+    <hr class="divider">
+
+    <span class="plate"><span class="dot"></span>Account status: active</span>
+  </div>
+</body>
+</html>
