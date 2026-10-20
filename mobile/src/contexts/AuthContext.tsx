@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { authService, AuthState, Profile } from '@parkwise/shared';
+import { authService, supabase, AuthState, Profile } from '@parkwise/shared';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
@@ -118,6 +118,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Staff actions (PWD verification, etc.) happen on the desktop console, not
+  // in this app, so nothing here would otherwise know to refetch - subscribe
+  // directly to this user's own profile row so a change (like pwd_verified
+  // flipping) reaches the app immediately, regardless of which screen is
+  // open or when it was last focused.
+  useEffect(() => {
+    const client = supabase;
+    if (!state.user?.id || !client) return;
+
+    const channel = client
+      .channel(`profile-changes-${state.user.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${state.user.id}` },
+        (payload: { new: Profile }) => {
+          setState((prev) => ({ ...prev, profile: payload.new }));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [state.user?.id]);
 
   const login = async (email: string, password: string, rememberMe?: boolean) => {
     const data = await authService.login({ email, password });

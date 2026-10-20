@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Platform, View, Text, StyleSheet } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
@@ -26,6 +26,7 @@ import HelpScreen from './src/screens/HelpScreen';
 import WayfindingScreen from './src/screens/WayfindingScreen';
 
 const Stack = createNativeStackNavigator();
+const navigationRef = createNavigationContainerRef();
 
 /** A phone is ~430 dp wide; browser previews are pinned to that. */
 const PHONE_MAX_WIDTH = 430;
@@ -40,6 +41,33 @@ function AppRoutes() {
     signedIn: !!user,
     role: profile?.role ?? null,
   });
+
+  // A customer who checked "I have a PWD permit" at sign-up but hasn't
+  // submitted a permit number yet is sent straight to Settings (with the PWD
+  // sheet already open) instead of Dashboard, so they finish verification
+  // before using the rest of the app. Once they submit a number this stops
+  // being true, even while staff verification is still pending.
+  const needsPwdSetup = !!profile?.pwd_intent && !profile?.pwd_permit_number;
+
+  // Done imperatively, not via the navigator's initialRouteName: the profile
+  // (and so needsPwdSetup) can become true either before OR after the
+  // signed-in stack first mounts, depending on whether this is a fresh login
+  // (profile arrives together with the user) or a restored session (profile
+  // arrives in a later update) - initialRouteName only ever applies at the
+  // exact moment of mounting, so it silently misses the second case. A guard
+  // ref stops this from firing again on every re-render while still true,
+  // and resets once it's no longer true so a later sign-in can redirect again.
+  const redirectedForPwdSetupRef = useRef(false);
+  useEffect(() => {
+    if (!navigationRef.isReady()) return;
+
+    if (needsPwdSetup && !redirectedForPwdSetupRef.current) {
+      redirectedForPwdSetupRef.current = true;
+      (navigationRef as any).navigate('Settings', { autoOpenPwd: true });
+    } else if (!needsPwdSetup) {
+      redirectedForPwdSetupRef.current = false;
+    }
+  }, [needsPwdSetup]);
 
   if (loading) {
     // Never render nothing: a blank screen is indistinguishable from a crash.
@@ -69,24 +97,8 @@ function AppRoutes() {
     );
   }
 
-  // A customer who checked "I have a PWD permit" at sign-up but hasn't
-  // submitted a permit number yet is sent straight to Settings (with the PWD
-  // sheet already open) instead of Dashboard, so they finish verification
-  // before using the rest of the app. Once they submit a number this stops
-  // being true, even while staff verification is still pending.
-  const needsPwdSetup = !!profile?.pwd_intent && !profile?.pwd_permit_number;
-
   return (
-    // initialRouteName only applies when a navigator first mounts - without a
-    // key that changes here, React treats this as the SAME navigator
-    // instance across the login transition (same type, same tree position)
-    // and never re-applies it, always landing on the first declared screen
-    // instead. The key forces a fresh mount whenever this flips.
-    <Stack.Navigator
-      key={needsPwdSetup ? 'customer-pwd-setup' : 'customer'}
-      initialRouteName={needsPwdSetup ? 'Settings' : 'Dashboard'}
-      screenOptions={{ headerShown: false }}
-    >
+    <Stack.Navigator key="customer" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Dashboard" component={DashboardScreen} />
       <Stack.Screen name="Reservation" component={ReservationScreen} />
       <Stack.Screen name="Timer" component={TimerScreen} />

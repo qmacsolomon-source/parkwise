@@ -149,6 +149,23 @@ SELECT column_name FROM information_schema.columns
 
 Expected: one row.
 
+### `06_profiles_realtime.sql` — staff-side changes reach an open mobile app immediately
+
+Adds `profiles` to the realtime publication, so a change made on the desktop
+console (PWD verification, etc.) reaches an already-open mobile session right
+away instead of waiting for something else to trigger a refetch.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT COUNT(*) FROM pg_publication_tables
+ WHERE pubname = 'supabase_realtime' AND tablename = 'profiles';
+```
+
+Expected: `1`.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -177,6 +194,8 @@ WITH r AS (
               WHERE polrelid = 'storage.buckets'::regclass AND polname ILIKE '%pwd-permits bucket%'
   UNION ALL SELECT 'pwd_intent column', COUNT(*)::text, (COUNT(*) = 1) FROM information_schema.columns
               WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
+  UNION ALL SELECT 'profiles realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
+              WHERE pubname = 'supabase_realtime' AND tablename = 'profiles'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -195,6 +214,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `pwd permit photo policies` = **4**
 - `pwd-permits bucket policy` = **1**
 - `pwd_intent column` = **1**
+- `profiles realtime` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 
