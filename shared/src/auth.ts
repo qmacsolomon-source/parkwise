@@ -68,19 +68,17 @@ export const authService = {
 
     if (error) throw error;
 
-    // Best-effort fallback for a database where handle_new_user() has not
-    // been installed yet (confirmed directly against the live project: it
-    // doesn't exist there as of this writing, despite an earlier version of
-    // this comment claiming otherwise). Upserts, not inserts, so this is a
-    // harmless no-op once the trigger above is actually live and has
-    // already created both rows - never fails the sign-up itself either
-    // way. Requires the "Users can insert own profile" RLS policy
-    // (profiles, auth.uid() = id AND role = 'customer') for the profile
-    // half; signUp() only grants a session immediately if email
-    // confirmation is off - if it's on, there's no session yet to upsert
-    // under, and this needs a fallback at first-login time instead (not
-    // yet implemented).
-    if (data.user) {
+    // Best-effort fallback for a database where handle_new_user() isn't
+    // installed (or for a race where it somehow hasn't run yet) - upserts,
+    // not inserts, so this is a harmless no-op once the trigger has already
+    // created both rows. Gated on an actual session existing: this needs
+    // the signed-up user's own JWT to pass RLS (auth.uid() = id), and
+    // signUp() only grants a session immediately when email confirmation is
+    // off. When confirmation is required there's no session yet, so this
+    // would always fail with a 42501 - skip it rather than log a confusing
+    // error for something the trigger already handles unconditionally
+    // server-side (it runs on auth.users insert, with no session needed).
+    if (data.user && data.session) {
       const { error: profileError } = await supabase
         .from('profiles')
         .upsert({
@@ -100,9 +98,10 @@ export const authService = {
     }
 
     // Same normalisation as the metadata above, so both paths produce the
-    // same plate.
+    // same plate. Same session gate as the profile fallback above, and for
+    // the same reason.
     const fallbackPlate = normalizePlate(credentials.plate_number);
-    if (data.user && PLATE_PATTERN.test(fallbackPlate)) {
+    if (data.user && data.session && PLATE_PATTERN.test(fallbackPlate)) {
       const { error: vehicleError } = await supabase
         .from('vehicles')
         .upsert(
