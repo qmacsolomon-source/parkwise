@@ -785,3 +785,14 @@ Reported right after Round 51: the list showed nothing even though a reservation
 
 - **`desktop/src/pages/SlotAssignment.tsx`**: disambiguated the embed to `slots!reservations_slot_id_fkey(...)` (the specific FK PostgREST's own error message named as the fix), and `loadReservations()` now reads `error` from the response and surfaces it through the page's existing error banner instead of discarding it.
 - Checked the rest of `desktop/src` and `mobile/src` for the same `slots!inner` pattern - this was the only occurrence.
+
+## Round 53: "Accept Vehicle" did nothing in the browser - agent-service had no CORS configuration at all
+
+Reported as "nothing is happening" with no visible error at first, then the browser console showed "Failed to fetch." `agent-service/main.py` had zero CORS setup - no `CORSMiddleware`, nothing. The desktop console (`http://localhost:5173`) and agent-service (`http://localhost:8000`) are different origins, so without CORS headers the browser blocks every one of these `fetch()` calls outright before the request body is even sent - not just the new Accept Vehicle button, every agent-service call the desktop app makes (Accept Vehicle, Retry Capture, Confirm Match, Release). This had never been caught because every round of testing this session exercised these endpoints with `curl`, which isn't subject to CORS - this was the first time one got clicked from an actual browser.
+
+Confirmed directly against the running server: an `OPTIONS` preflight to `/agents/{id}/accept` came back `405 Method Not Allowed` (no CORS middleware to intercept it, and the route itself only registers `POST`) - which is exactly what makes a browser's `fetch()` fail with "Failed to fetch" before the real request ever goes out.
+
+- **`agent-service/main.py`**: added `CORSMiddleware` with `allow_origins=["*"]`. Wide open rather than a fixed origin list, matching the already-established posture for this service (LAN-only testing, no auth on any endpoint already - see Round 45-46's discussion).
+- Worth knowing for next time: the running server was started with `--reload` (uvicorn/WatchFiles), and editing `main.py` logged `"WatchFiles detected changes... Reloading..."` but the preflight kept failing for a couple of minutes after that - the reload did not actually take effect (no fresh startup sequence ever appeared in the log after that line, unlike a real restart). Killed all `python.exe` processes and started clean instead of trusting the in-place reload; confirmed the preflight returns `200` with `access-control-allow-origin: *` only after the full cold start.
+
+**Action required**: `agent-service` needs to be restarted for this fix to take effect if it's currently running.

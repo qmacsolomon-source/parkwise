@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -17,6 +18,21 @@ app = FastAPI(
     title="ParkWise Agent Service",
     description="Intelligent parking slot agents for license plate recognition",
     version="1.0.0"
+)
+
+# The desktop console (http://localhost:5173) and this service
+# (http://localhost:8000) are different origins, so without CORS headers
+# every fetch() call from the browser - Accept Vehicle, Confirm Match, Retry
+# Capture, Release - is blocked outright with "Failed to fetch" before the
+# request even reaches a route handler. Wide open ("*") rather than a fixed
+# origin list: this is a LAN-only testing tool with no auth on its own
+# endpoints already (see README), so there is nothing an open CORS policy
+# exposes that an open API did not already.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Agent manager
