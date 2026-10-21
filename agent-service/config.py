@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     max_retry_attempts: int = 3
     frame_storage_bucket: str = "frames"
     
+    # ESP32-CAM hardware
+    # When true, a frame arriving for an IDLE slot auto-arms the agent from that
+    # slot's live reservation (expected plate = reserved vehicle's plate), so the
+    # camera works without an attendant pressing "accept" first.
+    auto_arm_frames: bool = False
+
     # Model Configuration
     # Pretrained license-plate detector (YOLOv5m fine-tuned on plates), not
     # a generic COCO yolov5s - see models/README.md for where it came from.

@@ -123,10 +123,10 @@ SELECT email, role FROM public.profiles WHERE email = 'admin@parkwise.com';
 
 ## Step 6 — `seed.sql`
 
-Creates the parking map: **3 floors × 34 slots = 102 slots**, one rates row and
+Creates the parking map: **3 floors × 69 slots = 207 slots**, one rates row and
 one agent state per slot, and enables Realtime.
 
-**Check it worked** (expect `102`):
+**Check it worked** (expect `207`):
 
 ```sql
 SELECT count(*) FROM public.slots;
@@ -141,10 +141,13 @@ Adds the floor-plan geometry columns to `slots` and backfills the coordinates,
 then creates `facility_layout`, `get_floor_plan()`, `assign_slot_for_reservation()`
 and `change_reservation_slot()`.
 
-**Check it worked** (expect `102`):
+**Check it worked** (expect `207` and `207` — every slot placed and ranked):
 
 ```sql
-SELECT count(*) FROM public.slots WHERE floor_x IS NOT NULL;
+SELECT count(*) FILTER (WHERE floor_x IS NOT NULL) AS with_geometry,
+       count(*) FILTER (WHERE entry_rank IS NOT NULL) AS with_rank,
+       count(*) AS total
+  FROM public.slots;
 ```
 
 > This file must come **after** `seed.sql` (it backfills the rows `seed.sql`
@@ -160,28 +163,29 @@ Run this once. Every row should say **`true`**.
 
 ```sql
 SELECT label, ok, actual FROM (VALUES
-  ('102 slots (34 on each of 3 floors)',
-   (SELECT count(*)::int FROM public.slots) = 102
-     AND (SELECT count(*)::int FROM public.slots WHERE floor = 1) = 34
-     AND (SELECT count(*)::int FROM public.slots WHERE floor = 2) = 34
-     AND (SELECT count(*)::int FROM public.slots WHERE floor = 3) = 34,
+  ('207 slots (69 on each of 3 floors)',
+   (SELECT count(*)::int FROM public.slots) = 207
+     AND (SELECT count(*)::int FROM public.slots WHERE floor = 1) = 69
+     AND (SELECT count(*)::int FROM public.slots WHERE floor = 2) = 69
+     AND (SELECT count(*)::int FROM public.slots WHERE floor = 3) = 69,
    (SELECT count(*)::text FROM public.slots)),
-  ('PWD slots = 1A11,1A12,2A11,2A12,3A11,3A12',
-   (SELECT string_agg(slot_code, ',' ORDER BY slot_code) FROM public.slots WHERE is_pwd)
-     = '1A11,1A12,2A11,2A12,3A11,3A12',
-   (SELECT string_agg(slot_code, ',' ORDER BY slot_code) FROM public.slots WHERE is_pwd)),
+  ('PWD slots = 90 (30 per floor: 25 block_a + 5 side)',
+   (SELECT count(*)::int FROM public.slots WHERE is_pwd) = 90
+     AND (SELECT count(*)::int FROM public.slots WHERE is_pwd AND zone = 'block_a') = 75
+     AND (SELECT count(*)::int FROM public.slots WHERE is_pwd AND zone = 'side') = 15,
+   (SELECT count(*)::text FROM public.slots WHERE is_pwd)),
   ('1 rates row',
    (SELECT count(*)::int FROM public.rates) = 1,
    (SELECT count(*)::text FROM public.rates)),
   ('1 facility_layout row',
    (SELECT count(*)::int FROM public.facility_layout) = 1,
    (SELECT count(*)::text FROM public.facility_layout)),
-  ('102 agent_states',
-   (SELECT count(*)::int FROM public.agent_states) = 102,
+  ('207 agent_states',
+   (SELECT count(*)::int FROM public.agent_states) = 207,
    (SELECT count(*)::text FROM public.agent_states)),
-  ('geometry backfilled on all 102 slots',
-   (SELECT count(*)::int FROM public.slots WHERE floor_x IS NOT NULL) = 102
-     AND (SELECT count(*)::int FROM public.slots WHERE entry_rank IS NOT NULL) = 102,
+  ('geometry + entry_rank backfilled on all 207 slots',
+   (SELECT count(*)::int FROM public.slots WHERE floor_x IS NOT NULL) = 207
+     AND (SELECT count(*)::int FROM public.slots WHERE entry_rank IS NOT NULL) = 207,
    (SELECT count(*)::text FROM public.slots WHERE floor_x IS NOT NULL)),
   ('functions installed (is_admin, is_staff, get_floor_plan, ...)',
    (SELECT count(DISTINCT p.proname)::int FROM pg_proc p
@@ -244,7 +248,7 @@ SELECT label, ok, actual FROM (VALUES
 ## Advanced — upgrade path for an OLD 20-slot database (NOT for a fresh project)
 
 A fresh project does **not** need any of this: `seed.sql` already creates the
-final 3-floor / 102-slot layout. The two files below exist **only** to convert a
+final 3-floor / 207-slot layout. The two files below exist **only** to convert a
 database that still holds the very old single-floor layout (`A1`…`A20`). They are
 **not** part of the setup order.
 

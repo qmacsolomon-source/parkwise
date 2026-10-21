@@ -1,7 +1,7 @@
--- Legacy: built for the older 102-slot layout. The live database is the source of truth; see database/live_upgrade/RUN_ORDER_LIVE.md.
--- UPGRADE ONLY. Do NOT run on a fresh project. This file can delete or
--- rename slots; run it only on an old database after a backup, and only
--- if there are no reservations or payments you need.
+-- Legacy, UPGRADE ONLY: expands an old single-floor database into the older
+-- multi-floor 102-slot reference layout. Not part of the fresh-project order and
+-- not needed on a database that already has the 207-slot layout. See
+-- database/RUN_ORDER.md.
 --
 -- One-time migration: expands the existing single-floor, 20-slot layout
 -- (A1-A20) into the new 3-floor, 56-slots-per-floor parking map used by

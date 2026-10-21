@@ -1,4 +1,3 @@
--- Legacy: built for the older 102-slot layout. The live database is the source of truth; see database/live_upgrade/RUN_ORDER_LIVE.md.
 -- ParkWise Database Seeding Script
 -- Run after schema.sql, business_rules.sql, rls_policies.sql and
 -- profile_vehicle_rates_fixes.sql. No demo users are created here. Create the

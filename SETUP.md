@@ -113,7 +113,7 @@ ON CONFLICT (id) DO UPDATE SET role = 'admin';
 2. Copy it as-is — it needs no edits and creates no users
 3. Paste in SQL Editor and click "Run"
 
-This creates the parking map: 3 floors x 34 slots (102 total), one rates row,
+This creates the parking map: 3 floors x 69 slots (207 total), one rates row,
 and one agent state per slot.
 
 ### 4.8 Run Floor Plan and Assignment
@@ -201,8 +201,8 @@ This will start the Expo development server. You can:
 
 ### Test Desktop Console
 1. Login as attendant
-2. View all 102 slots (34 per floor, across 3 floors)
-3. Check that 1A11, 1A12, 2A11, 2A12, 3A11 and 3A12 show PWD badges
+2. View all 207 slots (69 per floor, across 3 floors)
+3. Check the PWD badges: `block_a` columns 8-12 of every 12-column row, plus `side` 1-5 (30 per floor)
 4. View reservations tab (empty initially)
 
 ### Test Mobile App
@@ -222,9 +222,9 @@ This will start the Expo development server. You can:
 
 ## Default Data
 
-### Slots (102 total)
-- 3 floors x 34 slots: `{floor}A1`..`{floor}A24` (block_a) and `{floor}S1`..`{floor}S10` (side)
-- PWD slots (blue badge): 1A11, 1A12, 2A11, 2A12, 3A11, 3A12
+### Slots (207 total)
+- 3 floors x 69 slots: `{floor}A1`..`{floor}A60` (block_a) and `{floor}S1`..`{floor}S9` (side)
+- PWD slots (blue badge): block_a columns 8-12 of every 12-column row, plus side 1-5 (90 total, 30 per floor)
 
 ### Rates
 - Hourly rate: ₱50
