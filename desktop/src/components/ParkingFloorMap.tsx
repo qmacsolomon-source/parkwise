@@ -202,13 +202,13 @@ export default function ParkingFloorMap({
     );
   }
 
-  // Plain "floor-spot" label (1-1, 1-2, ... 1-69) instead of the real slot
-  // code (1A1, 1S4, ...) - a simpler number an attendant can read at a
-  // glance on the map, one continuous sequence across the main block then
-  // the side column. Offset by the fixed box-list length (not the live
-  // slot count), so the numbering stays stable even while data is still
-  // filling in.
-  const renderSlot = (slot: Slot, box: Box | undefined, spotNumber: number) => {
+  // The real slot_code (1A1, 1S4, ...) - this used to be a made-up
+  // "floor-spot" sequence (1-1, 1-2, ...) that bore no relationship to the
+  // code shown everywhere else the same bay appears (reservation cards,
+  // Plate Verification, booking confirmations), so a reservation for "1S5"
+  // had no visible slot on this map labelled anything close to that - the
+  // attendant had to guess, or count boxes.
+  const renderSlot = (slot: Slot, box: Box | undefined) => {
     if (!box) return null;
     return (
       <Marker
@@ -218,7 +218,7 @@ export default function ParkingFloorMap({
         onClick={() => onSlotClick(slot)}
         title={getSlotTitle?.(slot)}
         box={box}
-        label={`${floor}-${spotNumber}`}
+        label={slot.slot_code}
       />
     );
   };
@@ -234,8 +234,8 @@ export default function ParkingFloorMap({
           draggable={false}
         />
         <div className="absolute inset-0">
-          {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i], i + 1))}
-          {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i], MAIN_BOXES.length + i + 1))}
+          {mainSlots.map((slot, i) => renderSlot(slot, MAIN_BOXES[i]))}
+          {sideSlots.map((slot, i) => renderSlot(slot, SIDE_BOXES[i]))}
         </div>
       </div>
     </div>

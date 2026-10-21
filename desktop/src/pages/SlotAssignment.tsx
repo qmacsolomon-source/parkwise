@@ -357,6 +357,21 @@ export default function SlotAssignment() {
 
       if (!response.ok) throw new Error('Failed to check in vehicle');
 
+      // reservations.status has a real 'active' value in its enum - it just
+      // never gets set anywhere, so every reservation sat at 'pending' from
+      // booking all the way to verification, no matter what had actually
+      // happened. Setting it here is what makes the card's own status pill
+      // (not just the separate camera badge) actually change, and it's also
+      // what the existing update_slot_status() trigger in business_rules.sql
+      // is already watching for - this is what turns the slot 'occupied' on
+      // the Slot Map above, with no new trigger needed.
+      const { error: activateError } = await supabase
+        .from('reservations')
+        .update({ status: 'active' })
+        .eq('id', reservation.id);
+
+      if (activateError) throw activateError;
+
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
