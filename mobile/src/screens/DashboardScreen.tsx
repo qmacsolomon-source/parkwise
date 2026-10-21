@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
-import { Penalty, Reservation, Vehicle, supabase } from '@parkwise/shared';
+import { AgentState, Penalty, Reservation, Vehicle, supabase } from '@parkwise/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/AccessibilityContext';
 import AppScreen from '../components/AppScreen';
@@ -87,6 +87,7 @@ export default function DashboardScreen() {
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [penalties, setPenalties] = useState<Penalty[]>([]);
   const [slotInfo, setSlotInfo] = useState<Record<string, SlotInfo>>({});
+  const [agentState, setAgentState] = useState<AgentState | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
@@ -271,6 +272,46 @@ export default function DashboardScreen() {
     ? new Date(activeReservation.start_time).getTime() <= now
     : false;
 
+  // Live camera check: only while the booking is actually ongoing (the
+  // attendant's "Accept Vehicle" is what starts frames being saved for a
+  // slot at all - before that, or once the booking's over, there is nothing
+  // to show). RLS (14_customer_agent_state_read.sql) scopes this to the
+  // customer's own slot, so this can never read another customer's frame.
+  useEffect(() => {
+    if (!supabase || !activeReservation || !ongoing) {
+      setAgentState(null);
+      return;
+    }
+
+    const slotId = activeReservation.slot_id;
+    let isCurrent = true;
+
+    void supabase
+      .from('agent_states')
+      .select('*')
+      .eq('slot_id', slotId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (isCurrent) setAgentState((data as AgentState | null) ?? null);
+      });
+
+    const channel = supabase
+      .channel(`home-agent-state-${slotId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'agent_states', filter: `slot_id=eq.${slotId}` },
+        (payload) => {
+          setAgentState(payload.eventType === 'DELETE' ? null : (payload.new as AgentState));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isCurrent = false;
+      void channel.unsubscribe();
+    };
+  }, [activeReservation?.slot_id, ongoing]);
+
   const countdownLabel = activeReservation
     ? ongoing
       ? `${formatDuration(new Date(now).toISOString(), activeReservation.end_time)} left`
@@ -371,6 +412,19 @@ export default function DashboardScreen() {
             <Text style={[typeToken('title', textScale), styles.countdown, { color: colors.textOnDark }]}>
               {countdownLabel}
             </Text>
+
+            {ongoing && agentState?.last_frame_url ? (
+              <View style={styles.cameraCheck}>
+                <Image
+                  source={{ uri: agentState.last_frame_url }}
+                  style={styles.cameraCheckImage}
+                  resizeMode="cover"
+                />
+                <Text style={[typeToken('caption', textScale), { color: colors.tealTint }]}>
+                  Live camera check - updated {formatTime(agentState.updated_at)}
+                </Text>
+              </View>
+            ) : null}
 
             <View style={styles.heroActions}>
               <Button
@@ -533,6 +587,16 @@ const styles = StyleSheet.create({
   },
   countdown: {
     marginTop: spacing.xxs,
+  },
+  cameraCheck: {
+    marginTop: spacing.sm,
+    gap: spacing.xxs,
+  },
+  cameraCheckImage: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    borderRadius: radius.md,
+    backgroundColor: 'rgba(255,255,255,0.08)',
   },
   heroActions: {
     flexDirection: 'row',

@@ -75,6 +75,7 @@ DROP POLICY IF EXISTS "Attendants can update reservations" ON reservations;
 
 DROP POLICY IF EXISTS "Attendants can view agent states" ON agent_states;
 DROP POLICY IF EXISTS "Attendants can update agent states" ON agent_states;
+DROP POLICY IF EXISTS "Customers can view their own slot's agent state" ON agent_states;
 
 DROP POLICY IF EXISTS "Attendants can view verification events" ON verification_events;
 DROP POLICY IF EXISTS "Attendants can insert verification events" ON verification_events;
@@ -203,6 +204,19 @@ CREATE POLICY "Attendants can view agent states" ON agent_states
 
 CREATE POLICY "Attendants can update agent states" ON agent_states
   FOR UPDATE USING (is_staff());
+
+-- A customer may read the agent_states row for their own slot while they
+-- have a live reservation on it (so the mobile app can show them the
+-- camera's latest photo of their own car), but never another customer's.
+CREATE POLICY "Customers can view their own slot's agent state" ON agent_states
+  FOR SELECT USING (
+    EXISTS (
+      SELECT 1 FROM reservations r
+      WHERE r.slot_id = agent_states.slot_id
+        AND r.customer_id = auth.uid()
+        AND r.status IN ('pending', 'active', 'verified')
+    )
+  );
 
 -- Verification events policies
 CREATE POLICY "Attendants can view verification events" ON verification_events

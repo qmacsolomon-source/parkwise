@@ -312,6 +312,26 @@ SELECT id, public FROM storage.buckets WHERE id = 'frames';
 
 Expected: one row, `public = true`.
 
+### `14_customer_agent_state_read.sql` — lets a customer see their own slot's camera photo
+
+Adds a SELECT policy on `agent_states` so a customer can read the row for
+their own slot (`last_frame_url`, confidence, state) while they have a
+pending/active/verified reservation on it - needed for the mobile app's
+"Live camera check" photo on the dashboard. Previously only staff could read
+`agent_states` at all. Scoped to the customer's own reservation, so this
+can never expose another customer's camera frame.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT policyname FROM pg_policies WHERE tablename = 'agent_states';
+```
+
+Expected: 3 rows (`Attendants can view agent states`, `Attendants can update
+agent states`, `Customers can view their own slot's agent state`).
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -358,6 +378,8 @@ WITH r AS (
               WHERE proname = 'email_for_phone'
   UNION ALL SELECT 'frames bucket', COUNT(*)::text, (COUNT(*) = 1) FROM storage.buckets
               WHERE id = 'frames'
+  UNION ALL SELECT 'agent_states customer read policy', COUNT(*)::text, (COUNT(*) = 1) FROM pg_policy
+              WHERE polrelid = 'public.agent_states'::regclass AND polname = 'Customers can view their own slot''s agent state'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -385,6 +407,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `protect_profile_columns trigger (SECURITY)` = **1**
 - `email_for_phone()` = **1**
 - `frames bucket` = **1**
+- `agent_states customer read policy` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 
