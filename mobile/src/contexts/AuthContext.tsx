@@ -6,7 +6,9 @@ interface AuthContextType extends AuthState {
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   register: (data: {
-    full_name: string;
+    first_name: string;
+    middle_name?: string;
+    last_name: string;
     email: string;
     phone: string;
     plate_number: string;
@@ -157,7 +159,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (data: {
-    full_name: string;
+    first_name: string;
+    middle_name?: string;
+    last_name: string;
     email: string;
     phone: string;
     plate_number: string;

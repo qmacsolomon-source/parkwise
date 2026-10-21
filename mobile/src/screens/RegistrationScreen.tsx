@@ -67,7 +67,9 @@ export default function RegistrationScreen() {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { colors, textScale } = useTheme();
 
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [plateNumber, setPlateNumber] = useState('');
@@ -105,7 +107,8 @@ export default function RegistrationScreen() {
   const validateForm = (): boolean => {
     const newErrors: Record<string, string> = {};
 
-    if (!fullName.trim()) newErrors.fullName = 'Full name is required';
+    if (!firstName.trim()) newErrors.firstName = 'First name is required';
+    if (!lastName.trim()) newErrors.lastName = 'Surname is required';
     if (!email.trim()) newErrors.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(email)) newErrors.email = 'Invalid email format';
 
@@ -137,7 +140,9 @@ export default function RegistrationScreen() {
     setFormMessage(null);
     try {
       await register({
-        full_name: fullName,
+        first_name: firstName,
+        middle_name: middleName || undefined,
+        last_name: lastName,
         email,
         phone,
         plate_number: normalizePlate(plateNumber),
@@ -207,15 +212,37 @@ export default function RegistrationScreen() {
             ) : null}
 
             <TextField
-              label="Full Name"
-              value={fullName}
-              onChangeText={setFullName}
-              placeholder="Juan Dela Cruz"
+              label="First Name"
+              value={firstName}
+              onChangeText={setFirstName}
+              placeholder="Juan"
               autoCapitalize="words"
               editable={!loading}
               leadingIcon="person-outline"
-              invalid={!!errors.fullName}
-              message={errors.fullName}
+              invalid={!!errors.firstName}
+              message={errors.firstName}
+            />
+
+            <TextField
+              label="Middle Name (optional)"
+              value={middleName}
+              onChangeText={setMiddleName}
+              placeholder="Santos"
+              autoCapitalize="words"
+              editable={!loading}
+              leadingIcon="person-outline"
+            />
+
+            <TextField
+              label="Surname"
+              value={lastName}
+              onChangeText={setLastName}
+              placeholder="Dela Cruz"
+              autoCapitalize="words"
+              editable={!loading}
+              leadingIcon="person-outline"
+              invalid={!!errors.lastName}
+              message={errors.lastName}
             />
 
             <TextField

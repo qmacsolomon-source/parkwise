@@ -185,6 +185,49 @@ SELECT confdeltype FROM pg_constraint WHERE conname = 'reservations_vehicle_id_f
 
 Expected: one column row, and `confdeltype = 'r'` (RESTRICT, not `'c'` for CASCADE).
 
+### `08_realtime_publication.sql` — turns on live updates for slots, reservations, notifications
+
+The mobile app has been subscribing to realtime changes on `slots`,
+`reservations`, `notifications` and `agent_states` this whole time — but only
+`profiles` was ever added to the live project's realtime publication, so
+those subscriptions connect but silently receive nothing. This is why the new
+occupancy dots and live notifications don't update until you manually
+refresh/reopen a screen. This file turns them on for real.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT tablename FROM pg_publication_tables
+ WHERE pubname = 'supabase_realtime' ORDER BY tablename;
+```
+
+Expected: `agent_states`, `notifications`, `profiles`, `reservations`, `slots` (5 rows).
+
+### `09_profile_name_parts.sql` — splits sign-up name into First / Middle / Surname
+
+Registration now asks for First Name / Middle Name (optional) / Surname
+separately instead of one "Full Name" field. Adds `profiles.first_name`,
+`profiles.middle_name`, `profiles.last_name` (all nullable — null for every
+row that existed before this, and for staff accounts, which still have no
+name-parts concept). `full_name` itself is untouched and still gets computed
+automatically from the three parts, so every existing place that reads
+`profiles.full_name` (desktop reports, payment logs, notifications, account
+creation, user management) keeps working exactly as before.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_schema='public' AND table_name='profiles'
+   AND column_name IN ('first_name','middle_name','last_name');
+```
+
+Expected: 3 rows.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -219,6 +262,10 @@ WITH r AS (
               WHERE table_schema='public' AND table_name='vehicles' AND column_name='is_active'
   UNION ALL SELECT 'vehicle FK is RESTRICT', confdeltype::text, (confdeltype = 'r') FROM pg_constraint
               WHERE conname = 'reservations_vehicle_id_fkey'
+  UNION ALL SELECT 'realtime: slots/reservations/notifications/agent_states', COUNT(*)::text, (COUNT(*) = 4) FROM pg_publication_tables
+              WHERE pubname = 'supabase_realtime' AND tablename IN ('slots','reservations','notifications','agent_states')
+  UNION ALL SELECT 'profile name-parts columns', COUNT(*)::text, (COUNT(*) = 3) FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='profiles' AND column_name IN ('first_name','middle_name','last_name')
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -240,6 +287,8 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `profiles realtime` = **1**
 - `vehicles.is_active column` = **1**
 - `vehicle FK is RESTRICT` → `ok = true`
+- `realtime: slots/reservations/notifications/agent_states` = **4**
+- `profile name-parts columns` = **3**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

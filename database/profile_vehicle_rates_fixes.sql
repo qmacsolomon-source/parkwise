@@ -44,6 +44,14 @@ $$;
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS pwd_intent BOOLEAN NOT NULL DEFAULT false;
 
+-- Split name parts, collected at sign-up (nullable: null for staff accounts,
+-- which the desktop console creates with full_name only). Both functions
+-- below compute full_name from these when present, so every existing reader
+-- of profiles.full_name keeps working unchanged.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS first_name  TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS middle_name TEXT;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS last_name   TEXT;
+
 -- ---------------------------------------------------------------------------
 -- 1. ensure_my_profile()
 --    Creates the caller's profile from their auth.users metadata when it is
@@ -62,12 +70,16 @@ DECLARE
   v_row        public.profiles;
   v_meta       JSONB;
   v_email      TEXT;
+  v_first      TEXT;
+  v_middle     TEXT;
+  v_last       TEXT;
   v_name       TEXT;
   v_phone      TEXT;
   v_plate      TEXT;
   v_type       TEXT;
   v_pwd        TEXT;
   v_pwd_intent BOOLEAN;
+  v_full_name  TEXT;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
@@ -83,6 +95,9 @@ BEGIN
     FROM auth.users u
    WHERE u.id = v_uid;
 
+  v_first      := NULLIF(btrim(COALESCE(v_meta->>'first_name', '')), '');
+  v_middle     := NULLIF(btrim(COALESCE(v_meta->>'middle_name', '')), '');
+  v_last       := NULLIF(btrim(COALESCE(v_meta->>'last_name', '')), '');
   v_name       := NULLIF(btrim(COALESCE(v_meta->>'full_name', '')), '');
   v_phone      := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
   v_type       := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
@@ -90,10 +105,22 @@ BEGIN
   v_pwd_intent := COALESCE((v_meta->>'pwd_intent')::boolean, false);
   v_plate      := public.normalize_plate(v_meta->>'plate_number');
 
-  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number, pwd_intent)
+  -- Prefer the split name parts; fall back to the old single full_name
+  -- metadata key for an older app build that never sends name parts.
+  IF v_first IS NOT NULL OR v_last IS NOT NULL THEN
+    v_full_name := NULLIF(btrim(concat_ws(' ', v_first, v_middle, v_last)), '');
+  ELSE
+    v_full_name := v_name;
+  END IF;
+
+  INSERT INTO public.profiles
+    (id, full_name, first_name, middle_name, last_name, email, phone, role, status, pwd_permit_number, pwd_intent)
   VALUES (
     v_uid,
-    COALESCE(v_name, v_email, 'ParkWise customer'),
+    COALESCE(v_full_name, v_email, 'ParkWise customer'),
+    v_first,
+    v_middle,
+    v_last,
     COALESCE(v_email, v_phone, 'unknown@parkwise.local'),
     COALESCE(v_phone, ''),
     'customer',                 -- never taken from metadata
@@ -131,17 +158,31 @@ SET search_path = public
 AS $$
 DECLARE
   v_meta       JSONB := COALESCE(NEW.raw_user_meta_data, '{}'::jsonb);
+  v_first      TEXT := NULLIF(btrim(COALESCE(v_meta->>'first_name', '')), '');
+  v_middle     TEXT := NULLIF(btrim(COALESCE(v_meta->>'middle_name', '')), '');
+  v_last       TEXT := NULLIF(btrim(COALESCE(v_meta->>'last_name', '')), '');
   v_name       TEXT := NULLIF(btrim(COALESCE(NEW.raw_user_meta_data->>'full_name', '')), '');
   v_phone      TEXT := NULLIF(btrim(COALESCE(v_meta->>'phone', '')), '');
   v_type       TEXT := NULLIF(btrim(COALESCE(v_meta->>'vehicle_type', '')), '');
   v_pwd        TEXT := NULLIF(btrim(COALESCE(v_meta->>'pwd_permit_number', '')), '');
   v_pwd_intent BOOLEAN := COALESCE((v_meta->>'pwd_intent')::boolean, false);
   v_plate      TEXT := public.normalize_plate(v_meta->>'plate_number');
+  v_full_name  TEXT;
 BEGIN
-  INSERT INTO public.profiles (id, full_name, email, phone, role, status, pwd_permit_number, pwd_intent)
+  IF v_first IS NOT NULL OR v_last IS NOT NULL THEN
+    v_full_name := NULLIF(btrim(concat_ws(' ', v_first, v_middle, v_last)), '');
+  ELSE
+    v_full_name := v_name;
+  END IF;
+
+  INSERT INTO public.profiles
+    (id, full_name, first_name, middle_name, last_name, email, phone, role, status, pwd_permit_number, pwd_intent)
   VALUES (
     NEW.id,
-    COALESCE(v_name, NEW.email, 'ParkWise customer'),
+    COALESCE(v_full_name, NEW.email, 'ParkWise customer'),
+    v_first,
+    v_middle,
+    v_last,
     COALESCE(NEW.email, v_phone, 'unknown@parkwise.local'),
     COALESCE(v_phone, ''),
     'customer',                 -- never taken from metadata

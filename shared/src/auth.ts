@@ -16,7 +16,9 @@ export interface LoginCredentials {
 export interface SignupCredentials {
   email: string;
   password: string;
-  full_name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
   phone: string;
   plate_number?: string;
   /** Four-wheeled body type, e.g. 'sedan'. Defaults to 'four_wheeled'. */
@@ -44,11 +46,21 @@ export const authService = {
     // create a profile for sign-ups that come from this app, so it can never
     // interfere with the staff accounts the desktop console creates through
     // its own sign-up + profile-update flow.
+    const fullName = [credentials.first_name, credentials.middle_name, credentials.last_name]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ');
+
     const metadata: Record<string, string | boolean> = {
       source: 'mobile',
-      full_name: credentials.full_name,
+      first_name: credentials.first_name.trim(),
+      last_name: credentials.last_name.trim(),
+      full_name: fullName,
       phone: credentials.phone,
     };
+    if (credentials.middle_name?.trim()) {
+      metadata.middle_name = credentials.middle_name.trim();
+    }
     if (credentials.plate_number) {
       metadata.plate_number = normalizePlate(credentials.plate_number);
       metadata.vehicle_type = credentials.vehicle_type ?? 'four_wheeled';
@@ -83,7 +95,10 @@ export const authService = {
         .from('profiles')
         .upsert({
           id: data.user.id,
-          full_name: credentials.full_name,
+          full_name: fullName,
+          first_name: credentials.first_name.trim(),
+          middle_name: credentials.middle_name?.trim() || null,
+          last_name: credentials.last_name.trim(),
           email: credentials.email.toLowerCase(),
           phone: credentials.phone,
           role: 'customer',

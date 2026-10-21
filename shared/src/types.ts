@@ -19,6 +19,10 @@ export type SlotZoneRow = 'top' | 'bottom';
 export interface Profile {
   id: string;
   full_name: string;
+  /** Split name parts, collected at sign-up. Null for older rows created before this existed, and for staff accounts (desktop creates those with full_name only). */
+  first_name: string | null;
+  middle_name: string | null;
+  last_name: string | null;
   email: string;
   phone: string;
   role: UserRole;
