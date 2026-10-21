@@ -29,6 +29,7 @@ export default function SlotAssignment() {
   const [reservations, setReservations] = useState<ReservationWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [reassigning, setReassigning] = useState(false);
+  const [checkingInId, setCheckingInId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
@@ -255,6 +256,34 @@ export default function SlotAssignment() {
     }
   };
 
+  // Arms the camera-matching agent for this reservation's slot - the same
+  // call Plate Verification's "Accept Vehicle" makes, just reachable from
+  // the list the attendant is already looking at instead of making them
+  // re-pick the same slot and reservation from a pair of dropdowns on a
+  // different page.
+  const handleCheckIn = async (reservation: ReservationWithDetails) => {
+    setCheckingInId(reservation.id);
+    setError('');
+
+    try {
+      const response = await fetch(`${AGENT_SERVICE_URL}/agents/${reservation.slot_id}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_plate: reservation.vehicle_plate }),
+      });
+
+      if (!response.ok) throw new Error('Failed to check in vehicle');
+
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      console.error('Error checking in vehicle:', err);
+      setError(err.message || 'Failed to check in vehicle. Is agent-service running?');
+    } finally {
+      setCheckingInId(null);
+    }
+  };
+
   const handleSlotSettings = async () => {
     if (!editingSlot) return;
 
@@ -420,11 +449,19 @@ export default function SlotAssignment() {
                     </div>
                   </div>
                   <button
+                    onClick={() => handleCheckIn(reservation)}
+                    disabled={checkingInId === reservation.id}
+                    className="mt-3 w-full px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  >
+                    <CheckCircle size={14} />
+                    {checkingInId === reservation.id ? 'Checking in...' : 'Accept Vehicle (start camera watch)'}
+                  </button>
+                  <button
                     onClick={() => {
                       setSelectedReservation(reservation);
                       setShowReassignModal(true);
                     }}
-                    className="mt-3 w-full px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary-dark"
+                    className="mt-2 w-full px-3 py-1.5 text-sm bg-primary text-white rounded hover:bg-primary-dark"
                   >
                     Reassign
                   </button>
