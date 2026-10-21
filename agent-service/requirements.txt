@@ -1,7 +1,16 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
-supabase==2.3.4
+# supabase's own sub-dependencies (gotrue/postgrest/storage3/realtime) are
+# only internally consistent with each other at a matching, fairly recent
+# release - 2.3.4 pulls in a gotrue build that calls httpx with an API only
+# httpx>=0.26 has, while 2.3.4 itself demands httpx<0.26. Pin a version
+# where supabase's whole dependency tree was released and tested together.
+supabase==2.33.0
+# realtime (a supabase sub-dependency) needs the newer websockets.asyncio
+# client, added in websockets 13; capped below 16 because realtime itself
+# doesn't support that yet.
+websockets==15.0.1
 torch==2.1.0
 torchvision==0.16.0
 # Loads the pretrained plate_detector.pt (see models/README.md) via the
@@ -10,9 +19,9 @@ torchvision==0.16.0
 yolov5==7.0.14
 easyocr==1.7.1
 # Pinned below numpy 2.x: torch/opencv in this list were built against
-# numpy's 1.x ABI and silently corrupt/crash under 2.x. yolov5/sahi/
-# opencv's own newer releases want numpy>=2, which is why installing
-# yolov5 keeps trying to pull it back up - don't let that happen.
+# numpy's 1.x ABI and silently corrupt/crash under 2.x. yolov5's own
+# dependencies want numpy>=2, which is why installing yolov5 keeps trying
+# to pull it back up - don't let that happen.
 opencv-python==4.8.1.78
 numpy==1.26.4
 # setuptools>=81 dropped pkg_resources, which yolov5's own utils still
@@ -20,11 +29,12 @@ numpy==1.26.4
 setuptools<81
 Pillow==10.1.0
 python-dotenv==1.0.0
-pydantic==2.5.0
+pydantic==2.14.1
 pydantic-settings==2.1.0
 aiofiles==23.2.1
 structlog==23.2.0
 thefuzz==0.22.1
-# Pinned below 0.26: supabase==2.3.4's own client libraries (gotrue,
-# postgrest, storage3, supafunc) all require httpx<0.26.
-httpx==0.25.1
+httpx==0.28.1
+# Needed by simulator.py to POST frames without real hardware - not
+# imported anywhere else, but simulator.py has always needed it.
+aiohttp==3.13.3

@@ -673,6 +673,20 @@ Direct feedback after seeing the map in the app: the abstract vector drawing (gr
 
 **Action required**: run `13_frames_bucket.sql` on the live project (same folder, same place as `00`-`12`).
 
+## Round 46: actually ran `agent-service` end-to-end against the live database - real detection, real matching, real state transitions
+
+Round 45 confirmed the detection+OCR code worked in isolation; this round started the whole FastAPI service (`main.py`) for real and sent it real frames.
+
+- **`supabase==2.3.4` has internally inconsistent sub-dependencies**: its `gotrue` client calls an `httpx` API (`proxy=`) that only exists in `httpx>=0.26`, while `supabase` itself declares `httpx<0.26` - an unsatisfiable combination that crashed the server on startup (`TypeError: Client.__init__() got an unexpected keyword argument 'proxy'`) the moment it tried to connect to Supabase. Bumped `supabase` to `2.33.0`, where its whole dependency tree (gotrue/postgrest/storage3/realtime, now named `supabase-auth`/`supabase-functions` etc.) was actually released and tested together. That pulled in a newer `realtime` package needing `websockets`' newer async client (added in `websockets` 13) - pinned `websockets==15.0.1` to satisfy both that and `realtime`'s own `<16` ceiling.
+- `simulator.py` (and any test script using it the same way) imports `aiohttp`, which was never in `requirements.txt` at all - added it.
+- With both fixed: started `main.py` for real. It connected to the live Supabase project and initialized **all 207 slot agents** from the database on startup (`agent_count=207`), confirmed via `/health`.
+- Ran a full `accept -> frame -> state -> release` cycle against a real slot, through the actual HTTP endpoints (not a unit test calling internal functions) - twice:
+  - **Matching plate**: agent state correctly reached `verified`, with `detected_plate` matching `expected_plate` exactly.
+  - **Wrong plate**: agent state correctly moved to `verifying` (retry 1 of 3), not straight to an alert - the retry-before-alert logic in `agent.py`'s `_verify_plate()` works as designed.
+- Did a full fresh-venv reinstall from the final `requirements.txt` afterward (not just patched the working one) to confirm the whole fixed dependency set installs cleanly and the server starts correctly from nothing - it does, with zero pip conflict warnings.
+
+At this point the whole software side - detection, OCR, fuzzy matching, the per-slot state machine, and the live database connection - is confirmed working end to end. The only remaining piece is genuinely hardware: flashing Marga's ESP32-CAM firmware and pointing it at wherever this service runs.
+
 ## Round 26: two real bugs found while actually running the mobile app, both local-only fixes (Marga's files, not pushed)
 
 Testing sign-up end-to-end surfaced a bug worse than the one Round 19 fixed: `mobile/src/contexts/AuthContext.tsx`'s `register()` checked only `if (result.user)` before marking the app "signed in" - but Supabase's `signUp()` always returns a `user` object the instant the account is created, whether or not email confirmation is required, and only returns an actual `session` (a real access token) when it isn't. With confirmation genuinely on, this meant the app swapped straight into the main screens with **no valid session at all**, before the Registration screen's own "check your email" message ever got a chance to show - and every database call right after (profile creation, vehicle creation, `ensure_my_profile`) failed outright, since there was no authenticated token behind any of them. Fixed by checking `result.user && result.session` instead, so the app only signs in when there's an actual session; otherwise it correctly falls through to the existing "check your email to verify your account" screen.
