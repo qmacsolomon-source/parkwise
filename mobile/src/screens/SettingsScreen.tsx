@@ -6,6 +6,11 @@ import { useNavigation, useRoute, useFocusEffect, NavigationProp } from '@react-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService, supabase, getPwdPermitPhotoUrl } from '@parkwise/shared';
 import { uploadMyPwdPermitPhoto } from '../utils/pwdPermitPhoto';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  NOTIFICATION_PREFS_KEY,
+  NotificationPrefs,
+} from '../utils/notificationPrefs';
 
 import AppScreen from '../components/AppScreen';
 import SegmentedControl from '../components/SegmentedControl';
@@ -38,18 +43,6 @@ const TEXT_SIZE_OPTIONS: { label: string; value: TextSize }[] = [
   { label: 'Large', value: 'large' },
 ];
 
-/** Notification choices are stored on the device (there is no push service yet). */
-const NOTIFICATION_PREFS_KEY = '@parkwise/notification-prefs:v1';
-
-interface NotificationPrefs {
-  bookingUpdates: boolean;
-  penaltyReminders: boolean;
-}
-
-const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
-  bookingUpdates: true,
-  penaltyReminders: true,
-};
 
 function formatMoney(amount: number): string {
   return `₱${amount.toLocaleString(undefined, {
@@ -93,7 +86,9 @@ export default function SettingsScreen() {
 
   // --- edit profile -------------------------------------------------------
   const [editOpen, setEditOpen] = useState(false);
-  const [editName, setEditName] = useState('');
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editMiddleName, setEditMiddleName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -212,7 +207,19 @@ export default function SettingsScreen() {
   };
 
   const openEditProfile = () => {
-    setEditName(profile?.full_name ?? '');
+    // Older profiles (created before the name was split into parts) have no
+    // first_name/last_name yet - best-effort split their existing full_name
+    // so editing doesn't present them with blank fields.
+    if (profile?.first_name || profile?.last_name) {
+      setEditFirstName(profile?.first_name ?? '');
+      setEditMiddleName(profile?.middle_name ?? '');
+      setEditLastName(profile?.last_name ?? '');
+    } else {
+      const words = (profile?.full_name ?? '').trim().split(/\s+/).filter(Boolean);
+      setEditFirstName(words[0] ?? '');
+      setEditLastName(words.length > 1 ? words[words.length - 1] : '');
+      setEditMiddleName(words.length > 2 ? words.slice(1, -1).join(' ') : '');
+    }
     setEditPhone(profile?.phone ?? '');
     setEditError(null);
     setEditOpen(true);
@@ -223,8 +230,8 @@ export default function SettingsScreen() {
       setEditError('Your profile could not be found. Please sign in again.');
       return;
     }
-    if (!editName.trim()) {
-      setEditError('Enter your name.');
+    if (!editFirstName.trim() || !editLastName.trim()) {
+      setEditError('Enter your first name and surname.');
       return;
     }
     if (!/^\d{11}$/.test(editPhone.replace(/\D/g, ''))) {
@@ -232,11 +239,19 @@ export default function SettingsScreen() {
       return;
     }
 
+    const firstName = editFirstName.trim();
+    const middleName = editMiddleName.trim();
+    const lastName = editLastName.trim();
+    const fullName = [firstName, middleName, lastName].filter(Boolean).join(' ');
+
     setEditBusy(true);
     setEditError(null);
     try {
       await authService.updateProfile(profile.id, {
-        full_name: editName.trim(),
+        full_name: fullName,
+        first_name: firstName,
+        middle_name: middleName || null,
+        last_name: lastName,
         phone: editPhone.trim(),
       });
       await refreshProfile();
@@ -596,14 +611,35 @@ export default function SettingsScreen() {
         }
       >
         <TextField
-          label="Full name"
-          value={editName}
-          onChangeText={setEditName}
+          label="First name"
+          value={editFirstName}
+          onChangeText={setEditFirstName}
           autoCapitalize="words"
           editable={!editBusy}
           leadingIcon="person-outline"
           invalid={!!editError}
         />
+        <View style={styles.sheetField}>
+          <TextField
+            label="Middle name (optional)"
+            value={editMiddleName}
+            onChangeText={setEditMiddleName}
+            autoCapitalize="words"
+            editable={!editBusy}
+            leadingIcon="person-outline"
+          />
+        </View>
+        <View style={styles.sheetField}>
+          <TextField
+            label="Surname"
+            value={editLastName}
+            onChangeText={setEditLastName}
+            autoCapitalize="words"
+            editable={!editBusy}
+            leadingIcon="person-outline"
+            invalid={!!editError}
+          />
+        </View>
         <View style={styles.sheetField}>
           <TextField
             label="Phone number"

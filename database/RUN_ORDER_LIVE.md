@@ -166,24 +166,6 @@ SELECT COUNT(*) FROM pg_publication_tables
 
 Expected: `1`.
 
-### `07_frames_bucket.sql` — Storage bucket for camera frames
-
-Creates the public `frames` bucket that `agent-service` uploads detected frames
-to, plus a SELECT policy on `storage.buckets` for the same reason as `04`.
-
-**Expected result:** `Success. No rows returned`.
-
-Quick check (paste on its own):
-
-```sql
-SELECT id, public FROM storage.buckets WHERE id = 'frames';
-```
-
-Expected: one row with `public = true`.
-
-> Only needed if you are running `agent-service`. Without this bucket,
-> `Storage.upload_frame()` fails and `agent_states.last_frame_url` stays null.
-
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -214,7 +196,6 @@ WITH r AS (
               WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
   UNION ALL SELECT 'profiles realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
               WHERE pubname = 'supabase_realtime' AND tablename = 'profiles'
-  UNION ALL SELECT 'frames bucket', COUNT(*)::text, (COUNT(*) = 1) FROM storage.buckets WHERE id = 'frames'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -234,7 +215,6 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `pwd-permits bucket policy` = **1**
 - `pwd_intent column` = **1**
 - `profiles realtime` = **1**
-- `frames bucket` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

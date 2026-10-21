@@ -263,6 +263,7 @@ export default function DashboardScreen() {
   // The profile row can be missing (older sign-ups); fall back to the local
   // part of the session email so the greeting is never blank.
   const firstName =
+    profile?.first_name ||
     (profile?.full_name ?? '').trim().split(' ')[0] ||
     (user?.email ?? '').split('@')[0] ||
     '';

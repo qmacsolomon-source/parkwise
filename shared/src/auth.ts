@@ -16,7 +16,9 @@ export interface LoginCredentials {
 export interface SignupCredentials {
   email: string;
   password: string;
-  full_name: string;
+  first_name: string;
+  middle_name?: string;
+  last_name: string;
   phone: string;
   plate_number?: string;
   /** Four-wheeled body type, e.g. 'sedan'. Defaults to 'four_wheeled'. */
@@ -44,11 +46,21 @@ export const authService = {
     // create a profile for sign-ups that come from this app, so it can never
     // interfere with the staff accounts the desktop console creates through
     // its own sign-up + profile-update flow.
+    const fullName = [credentials.first_name, credentials.middle_name, credentials.last_name]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ');
+
     const metadata: Record<string, string | boolean> = {
       source: 'mobile',
-      full_name: credentials.full_name,
+      first_name: credentials.first_name.trim(),
+      last_name: credentials.last_name.trim(),
+      full_name: fullName,
       phone: credentials.phone,
     };
+    if (credentials.middle_name?.trim()) {
+      metadata.middle_name = credentials.middle_name.trim();
+    }
     if (credentials.plate_number) {
       metadata.plate_number = normalizePlate(credentials.plate_number);
       metadata.vehicle_type = credentials.vehicle_type ?? 'four_wheeled';
@@ -83,7 +95,10 @@ export const authService = {
         .from('profiles')
         .upsert({
           id: data.user.id,
-          full_name: credentials.full_name,
+          full_name: fullName,
+          first_name: credentials.first_name.trim(),
+          middle_name: credentials.middle_name?.trim() || null,
+          last_name: credentials.last_name.trim(),
           email: credentials.email.toLowerCase(),
           phone: credentials.phone,
           role: 'customer',
@@ -135,6 +150,23 @@ export const authService = {
     if (!supabase || !isConfigured) {
       throw new Error('Supabase is not configured. Please check your environment variables.');
     }
+
+    // The login field accepts an email OR an 11-digit phone number - Supabase
+    // itself only signs in by email, so a phone-shaped identifier is first
+    // resolved to the matching email via email_for_phone(). If nothing
+    // matches, the original (phone-shaped) value is left in place so
+    // signInWithPassword below fails with the same generic "invalid
+    // credentials" error as a wrong password - never revealing whether that
+    // phone number exists.
+    let email = credentials.email;
+    const looksLikePhone = !email.includes('@') && /^\d{11}$/.test(email.replace(/\D/g, ''));
+    if (looksLikePhone) {
+      const { data: resolvedEmail } = await supabase.rpc('email_for_phone', {
+        p_phone: email,
+      });
+      if (resolvedEmail) email = resolvedEmail as string;
+    }
+
     // Log login attempt
     await this.logAudit('login_attempt', {
       email: credentials.email,
@@ -142,7 +174,7 @@ export const authService = {
     });
 
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: credentials.email,
+      email,
       password: credentials.password,
     });
 
@@ -236,10 +268,14 @@ export const authService = {
     return data;
   },
 
-  // Reset password
+  // Reset password. Without an explicit redirectTo, this falls back to the
+  // project's Site URL - which is the "you're verified" sign-up confirmation
+  // page, not anywhere a customer can actually type a new password. Reads
+  // EXPO_PUBLIC_RESET_PASSWORD_URL (web/reset-password.html, once deployed)
+  // so the two flows land on their own correct pages.
   async resetPassword(email: string, redirectTo?: string) {
     if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
-    const redirectUrl = redirectTo || '';
+    const redirectUrl = redirectTo || process.env.EXPO_PUBLIC_RESET_PASSWORD_URL || undefined;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl,
     });

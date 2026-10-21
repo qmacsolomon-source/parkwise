@@ -2,11 +2,13 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { authService, supabase, AuthState, Profile } from '@parkwise/shared';
 
 interface AuthContextType extends AuthState {
-  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>;
+  login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   register: (data: {
-    full_name: string;
+    first_name: string;
+    middle_name?: string;
+    last_name: string;
     email: string;
     phone: string;
     plate_number: string;
@@ -144,7 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [state.user?.id]);
 
-  const login = async (email: string, password: string, rememberMe?: boolean) => {
+  const login = async (email: string, password: string) => {
     const data = await authService.login({ email, password });
     if (data.user) {
       const profile = await resolveProfile(data.user.id);
@@ -157,7 +159,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (data: {
-    full_name: string;
+    first_name: string;
+    middle_name?: string;
+    last_name: string;
     email: string;
     phone: string;
     plate_number: string;

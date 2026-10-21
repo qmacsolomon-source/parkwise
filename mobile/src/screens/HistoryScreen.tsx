@@ -97,18 +97,26 @@ export default function HistoryScreen() {
     }
 
     try {
-      const [reservationsData, paymentsData, penaltiesData] = await Promise.all([
-        supabase
-          .from('reservations')
-          .select('*')
-          .eq('customer_id', profile.id)
-          .in('status', ['completed', 'cancelled', 'no_show', 'overstay'])
-          .order('created_at', { ascending: false }),
-        supabase
-          .from('payments')
-          .select('*')
-          .eq('reservation_id', profile.id)
-          .order('paid_at', { ascending: false }),
+      // payments has no customer_id of its own - only reservation_id - so it
+      // can only be filtered to this customer's own payments once their
+      // reservation ids are known.
+      const reservationsData = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('customer_id', profile.id)
+        .in('status', ['completed', 'cancelled', 'no_show', 'overstay'])
+        .order('created_at', { ascending: false });
+
+      const reservationIds = (reservationsData.data ?? []).map((reservation) => reservation.id);
+
+      const [paymentsData, penaltiesData] = await Promise.all([
+        reservationIds.length
+          ? supabase
+              .from('payments')
+              .select('*')
+              .in('reservation_id', reservationIds)
+              .order('paid_at', { ascending: false })
+          : Promise.resolve({ data: [] as Payment[], error: null }),
         supabase
           .from('penalties')
           .select('*')

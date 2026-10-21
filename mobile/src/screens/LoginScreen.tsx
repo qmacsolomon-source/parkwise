@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,7 +13,7 @@ import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { isConfigured } from '@parkwise/shared';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/AccessibilityContext';
-import { radius, spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
+import { radius, spacing, type as typeToken } from '../theme/tokens';
 import { Button, Card, TextField, ScreenHeader, BottomSheet } from '../components/ui';
 
 type RootStackParamList = {
@@ -31,8 +30,6 @@ export default function LoginScreen() {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
   const [showResetModal, setShowResetModal] = useState(false);
@@ -69,7 +66,7 @@ export default function LoginScreen() {
     setLoading(true);
     setFormMessage(null);
     try {
-      await login(identifier, password, rememberMe);
+      await login(identifier, password);
     } catch (error: any) {
       setFormMessage({ tone: 'error', text: error.message || 'Please check your credentials' });
     } finally {
@@ -178,30 +175,6 @@ export default function LoginScreen() {
             />
 
             <View style={styles.row}>
-              <Pressable
-                onPress={() => setRememberMe((value) => !value)}
-                disabled={loading}
-                accessibilityRole="checkbox"
-                accessibilityLabel="Remember me"
-                accessibilityState={{ checked: rememberMe, disabled: loading }}
-                style={styles.remember}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    {
-                      borderColor: rememberMe ? colors.navy : colors.borderStrong,
-                      backgroundColor: rememberMe ? colors.navy : 'transparent',
-                    },
-                  ]}
-                >
-                  {rememberMe ? (
-                    <Ionicons name="checkmark" size={15} color={colors.textOnDark} />
-                  ) : null}
-                </View>
-                <Text style={[typeToken('body', textScale), { color: colors.text }]}>Remember me</Text>
-              </Pressable>
-
               <Button
                 label="Forgot Password?"
                 variant="ghost"
@@ -320,23 +293,9 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: spacing.sm,
     flexWrap: 'wrap',
-  },
-  remember: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    minHeight: TOUCH_TARGET,
-  },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   footer: {
     textAlign: 'center',
