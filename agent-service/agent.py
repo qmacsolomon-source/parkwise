@@ -69,6 +69,31 @@ class SlotAgent:
         """Get active reservation for this slot."""
         reservation = await Database.get_active_reservation(self.slot_id)
         return reservation['id'] if reservation else None
+
+    async def arm_from_reservation(self) -> bool:
+        """
+        Auto-arm this slot from its live reservation.
+
+        Used by the ESP32-CAM path: instead of waiting for an attendant to press
+        "accept", the expected plate is taken from the vehicle on the slot's live
+        reservation. Returns True when the agent was armed.
+        """
+        reservation = await Database.get_live_reservation(self.slot_id)
+        if not reservation:
+            logger.debug("No live reservation to arm from", slot_id=self.slot_id)
+            return False
+
+        vehicle = await Database.get_vehicle_by_id(reservation['vehicle_id'])
+        if not vehicle or not vehicle.get('plate_number'):
+            logger.warning("Live reservation has no readable vehicle",
+                           slot_id=self.slot_id, reservation_id=reservation['id'])
+            return False
+
+        self.reservation_id = reservation['id']
+        await self.accept_vehicle(vehicle['plate_number'])
+        logger.info("Agent auto-armed from reservation", slot_id=self.slot_id,
+                    expected_plate=vehicle['plate_number'])
+        return True
     
     async def accept_vehicle(self, expected_plate: str):
         """
@@ -134,6 +159,11 @@ class SlotAgent:
         Process a camera frame.
         Performs plate recognition and verification.
         """
+        if self.state == AgentState.IDLE and settings.auto_arm_frames:
+            # Hardware path: a camera just sent a frame for an idle slot, so arm
+            # the agent from the slot's live reservation instead of dropping it.
+            await self.arm_from_reservation()
+
         if self.state not in [AgentState.WAITING, AgentState.VERIFYING]:
             logger.debug("Ignoring frame - agent not in verification state", 
                         slot_id=self.slot_id, state=self.state.value)

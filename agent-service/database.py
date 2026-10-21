@@ -1,8 +1,13 @@
 from supabase import create_client, Client
 from config import settings
 from logger import get_logger
+import re
 
 logger = get_logger(__name__)
+
+_UUID_RE = re.compile(
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.IGNORECASE
+)
 
 
 class Database:
@@ -28,6 +33,68 @@ class Database:
             return response.data
         return None
     
+    @classmethod
+    async def resolve_slot(cls, slot_ref: str):
+        """
+        Resolve a slot reference from a camera's URL to the slots row.
+
+        Accepts either a slot_code ("1A1", case-insensitive) or a slot UUID, so
+        ESP32 firmware can hardcode the human-readable code instead of a UUID.
+        Returns the slot row, or None when nothing matches.
+        """
+        client = cls.get_client()
+        ref = (slot_ref or "").strip()
+        if not ref:
+            return None
+
+        if _UUID_RE.match(ref):
+            response = client.table('slots').select('*').eq('id', ref).limit(1).execute()
+            if response.data:
+                return response.data[0]
+
+        response = (
+            client.table('slots')
+            .select('*')
+            .ilike('slot_code', ref)
+            .limit(1)
+            .execute()
+        )
+        return response.data[0] if response.data else None
+
+    @classmethod
+    async def get_live_reservation(cls, slot_id: str):
+        """
+        Get the reservation currently holding a slot.
+
+        "Live" mirrors the no_overlapping_reservations EXCLUDE constraint in
+        schema.sql: anything not cancelled/completed/no_show. get_active_reservation()
+        only looks for status='active', which misses 'pending' bookings.
+
+        The status filter is applied here rather than in the query so it does not
+        depend on the postgrest client's negation API.
+        """
+        client = cls.get_client()
+        response = (
+            client.table('reservations')
+            .select('*')
+            .eq('slot_id', slot_id)
+            .order('start_time')
+            .limit(10)
+            .execute()
+        )
+        dead = {'cancelled', 'completed', 'no_show'}
+        for row in response.data or []:
+            if row.get('status') not in dead:
+                return row
+        return None
+
+    @classmethod
+    async def get_vehicle_by_id(cls, vehicle_id: str):
+        """Get vehicle by its id."""
+        client = cls.get_client()
+        response = client.table('vehicles').select('*').eq('id', vehicle_id).limit(1).execute()
+        return response.data[0] if response.data else None
+
     @classmethod
     async def get_agent_state(cls, slot_id: str):
         """Get agent state for slot."""
@@ -60,9 +127,9 @@ class Database:
     async def get_active_reservation(cls, slot_id: str):
         """Get active reservation for slot."""
         client = cls.get_client()
-        response = client.table('reservations').select('*').eq('slot_id', slot_id).eq('status', 'active').single().execute()
+        response = client.table('reservations').select('*').eq('slot_id', slot_id).eq('status', 'active').limit(1).execute()
         if response.data:
-            return response.data
+            return response.data[0]
         return None
     
     @classmethod

@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -6,6 +6,7 @@ import uvicorn
 from config import settings
 from logger import configure_logger, get_logger
 from agent_manager import get_agent_manager
+from database import Database
 
 # Configure logging
 configure_logger()
@@ -84,11 +85,46 @@ async def receive_frame(slot_id: str, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/frames/{slot_ref}/raw")
+async def receive_frame_raw(slot_ref: str, request: Request):
+    """
+    Receive a raw JPEG body from an ESP32-CAM (no multipart wrapper).
+
+    ESP32 HTTPClient can POST a camera buffer directly, but cannot easily build
+    multipart/form-data, so this is the endpoint firmware should target. The
+    UploadFile variant above requires a multipart field named "file", which is
+    what the desktop simulator uses.
+
+    `slot_ref` may be a slot_code ("1A1") or a slot UUID.
+    """
+    try:
+        frame_data = await request.body()
+        if not frame_data:
+            raise HTTPException(status_code=400, detail="Empty frame body")
+
+        slot = await Database.resolve_slot(slot_ref)
+        if not slot:
+            raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_ref}")
+
+        logger.info("Raw frame received", slot_code=slot['slot_code'], size=len(frame_data))
+        await agent_manager.process_frame(slot['id'], frame_data)
+
+        return JSONResponse(content={"status": "processed", "slot_code": slot['slot_code']})
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to process raw frame", slot_ref=slot_ref, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/beam/{slot_id}")
 async def beam_trigger(slot_id: str):
     """
-    Trigger from infrared break-beam sensor.
-    Can be used to trigger camera capture.
+    Manual detection trigger from the desktop console's "trigger capture" action.
+
+    The ESP32 firmware has no beam sensor -- the camera captures and sends its
+    own frames on a timer -- so this route only logs the event.
     """
     try:
         logger.info("Beam triggered", slot_id=slot_id)

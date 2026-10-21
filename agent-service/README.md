@@ -110,7 +110,8 @@ Receive camera frame from ESP32-CAM.
 ```
 
 ### POST /beam/{slot_id}
-Trigger from infrared break-beam sensor.
+Manual detection trigger (used by the desktop console's "trigger capture"
+button). It only logs; the camera sends its own frame separately.
 
 **Response**:
 ```json
@@ -262,54 +263,70 @@ python evaluate.py --test-dir test_images --output results.json --report report.
 
 ### Hardware Setup
 
-- ESP32-CAM with OV2640 camera
-- Infrared break-beam sensor (optional)
-- WiFi connection
+- ESP32-CAM with OV2640 camera (AI-Thinker board)
+- WiFi connection — the ESP32 and the machine running this service must be on
+  the **same LAN**
 
-### Firmware Code
+### Firmware
 
-Send JPEG frames to the agent service:
+Ready-to-flash firmware lives in `firmware/esp32_cam/esp32_cam.ino`. Open it in
+the Arduino IDE (board: *AI Thinker ESP32-CAM*), set `WIFI_SSID`,
+`WIFI_PASSWORD`, `AGENT_HOST` and `SLOT_CODE` at the top, then upload.
+
+It POSTs a raw JPEG body to `POST /frames/<SLOT_CODE>/raw`, where `SLOT_CODE`
+may be either a slot code (`1A1`) or a slot UUID — the service resolves both.
+
+The core of the upload is:
 
 ```cpp
-#include <WiFi.h>
-#include <HTTPClient.h>
-#include <base64.h>
+camera_fb_t* fb = esp_camera_fb_get();
 
-const char* ssid = "your_wifi";
-const char* password = "your_password";
-const char* agentUrl = "http://your-agent-ip:8000";
+char url[128];
+snprintf(url, sizeof(url), "http://%s:%d/frames/%s/raw", AGENT_HOST, AGENT_PORT, SLOT_CODE);
 
-void sendFrame() {
-  HTTPClient http;
-  String url = String(agentUrl) + "/frames/YOUR_SLOT_ID";
-  
-  http.begin(url);
-  http.addHeader("Content-Type", "image/jpeg");
-  
-  // Capture frame from camera
-  camera_fb_t* fb = esp_camera_fb_get();
-  
-  int httpResponseCode = http.POST(fb->buf, fb->len);
-  
-  esp_camera_fb_return(fb);
-  http.end();
+WiFiClient client;
+HTTPClient http;
+http.begin(client, url);
+http.addHeader("Content-Type", "image/jpeg");
+int status = http.POST(fb->buf, fb->len);   // raw body, no multipart
+
+http.end();
+esp_camera_fb_return(fb);
+```
+
+> **Do not** post to `POST /frames/{slot_id}` (the non-`/raw` route) from
+> firmware. That route is `UploadFile`, i.e. it requires multipart/form-data
+> with a field named `file`; a raw POST to it returns **422
+> Unprocessable Entity**. It is kept for the desktop `simulator.py`.
+
+### Capture cadence
+
+The camera is the only input — there is no break-beam sensor. `loop()` polls on
+a timer and POSTs whatever the camera sees:
+
+```cpp
+static const unsigned long SEND_INTERVAL_MS = 15000;   // must be > 0
+
+void loop() {
+  if (millis() - lastSendAt >= SEND_INTERVAL_MS) {
+    lastSendAt = millis();
+    sendFrame();
+  }
+  delay(50);
 }
 ```
 
-### Break-Beam Sensor
+Lower `SEND_INTERVAL_MS` for a faster reaction at the cost of more traffic and
+more CPU on this service (every frame runs the detector). Keep it well above the
+time one `process_frame()` takes.
 
-Trigger frame capture when beam is broken:
+### Making frames count without an attendant
 
-```cpp
-void IRAM_ATTR onBeamBreak() {
-  sendFrame();
-}
-
-void setup() {
-  pinMode(BEAM_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(BEAM_PIN), onBeamBreak, FALLING);
-}
-```
+By default `SlotAgent.process_frame()` ignores frames unless the slot is in
+`WAITING`/`VERIFYING`, so a camera alone does nothing until someone presses
+*accept*. Set `AUTO_ARM_FRAMES=true` in `.env` and an arriving frame for an idle
+slot will arm itself from that slot's live reservation (expected plate = the
+reserved vehicle's plate) before verifying.
 
 ## Monitoring
 

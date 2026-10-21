@@ -1,7 +1,8 @@
--- Legacy: built for the older 102-slot layout. The live database is the source of truth; see database/live_upgrade/RUN_ORDER_LIVE.md.
--- UPGRADE ONLY. Do NOT run on a fresh project. This file can delete or
--- rename slots; run it only on an old database after a backup, and only
--- if there are no reservations or payments you need.
+-- Legacy, UPGRADE ONLY, and DESTRUCTIVE: reshapes floors to the older 102-slot
+-- reference layout. Do NOT run it on a fresh project and never twice (it
+-- deletes or renames slots, cascading into reservations/payments); run it only
+-- on an old database, after a backup, and only if there are no reservations or
+-- payments you need. See database/RUN_ORDER.md.
 --
 -- One-time migration: shrink each floor's layout from 56 slots to the
 -- 34 slots that actually appear in the final reference images

@@ -1,4 +1,3 @@
--- Legacy: built for the older 102-slot layout. The live database is the source of truth; see database/live_upgrade/RUN_ORDER_LIVE.md.
 -- ParkWise: floor plan geometry + automatic slot assignment
 -- ---------------------------------------------------------------------------
 -- ONE idempotent file. Run the whole thing in the Supabase SQL Editor.
@@ -9,28 +8,29 @@
 -- re-run the file.)
 -- Safe to run twice: every statement is ADD COLUMN IF NOT EXISTS /
 -- CREATE TABLE IF NOT EXISTS / CREATE OR REPLACE / DROP POLICY IF EXISTS /
--- ON CONFLICT DO NOTHING, and the geometry UPDATEs always write the same
--- values. Nothing here drops or renames an existing column or table, so the
--- desktop console keeps working.
+-- ON CONFLICT DO NOTHING, and the geometry is only written while the new
+-- columns are still NULL. Nothing here drops or renames an existing column or
+-- table, so the desktop console keeps working.
 --
--- LAYOUT SOURCE OF TRUTH: the desktop console's own floor plan --
--- desktop/src/components/ParkingFloorMap.tsx -- draws each floor on top of
--- the 1920x1080 reference drawings desktop/src/assets/floor-maps/floor-{n}.png
--- and places slot markers at pixel coordinates measured off those images.
--- The seed below reuses EXACTLY those numbers, so the phone shows the same
--- floor plan as the desktop:
---   * block_a  top row    : 12 slots, y 375..565, centres at bayCentersX
---   * block_a  bottom row : 12 slots, y 693..883, same centres
---   * side column         : 10 slots, x 1536..1660, centres at sideCentersY
---   * PWD = block_a top-row columns 11 and 12 (nearest the core)
--- That is 34 slots per floor, 102 total -- the same 102 the desktop renders.
+-- LAYOUT: 3 floors x (60 block_a + 9 side) = 207 slots on a 1920x1080 canvas.
+-- This file backfills the geometry of every slot FROM THE DATA ITSELF -- the
+-- bay counts are read out of slots.floor / zone / zone_row / zone_col, so there
+-- is NO hard-coded 102, 34, 12 or 10 anywhere. block_a becomes a grid (however
+-- many columns and rows the data uses) and side becomes a single column of bays
+-- on the right.
+--
+-- The drawing is SCHEMATIC: bays sit on a clean grid computed from the slot
+-- rows, not traced from an image (the repo only has the OLD 34-bay reference
+-- drawings, which do not match this layout). shared/src/floorLayout.ts
+-- reproduces the SAME arithmetic in TypeScript, and
+-- database/live_upgrade/03_floor_plan_207.sql is the live-upgrade twin of this
+-- file -- keep all three in step if you ever move the facility.
 --
 -- The reference drawings do not carry machine-readable entry/aisle data, so
--- the single entrance/aisle row in facility_layout is an ASSUMPTION read off
--- the drawing's geometry (a drive lane in the gap between block A's right
--- edge and the side column, entry at the bottom). It lives in one editable
--- row -- UPDATE facility_layout if the real entrance is elsewhere; nothing
--- else has to change.
+-- the single entrance/aisle row in facility_layout is an ASSUMPTION: enter
+-- bottom-right, up the trunk lane, then along the cross lane between block A's
+-- rows. It lives in one editable row -- UPDATE facility_layout if the real
+-- entrance is elsewhere; nothing else has to change.
 --
 -- NOTE ON RLS + THE NEW SLOT COLUMNS: Postgres RLS is row-level, not
 -- column-level, so "only admins may modify the new slot columns" cannot be
@@ -60,13 +60,13 @@ CREATE TABLE IF NOT EXISTS facility_layout (
   id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
   canvas_width NUMERIC NOT NULL DEFAULT 1920,
   canvas_height NUMERIC NOT NULL DEFAULT 1080,
-  entrance_x NUMERIC NOT NULL DEFAULT 1420,
+  entrance_x NUMERIC NOT NULL DEFAULT 1505,
   entrance_y NUMERIC NOT NULL DEFAULT 1005,
   -- aisle = the drivable path, used by computeRoute()/describeDirections()
   -- in shared/src/floorPlan.ts:
   --   trunk     : the vertical lane (x, from y0 to y1)
-  --   crossLane : the horizontal lane that fans out to block A's two rows
-  aisle JSONB NOT NULL DEFAULT '{"entrance":{"x":1420,"y":1005},"trunk":{"x":1420,"y0":240,"y1":1005},"crossLane":{"y":629,"x0":430,"x1":1420}}'::jsonb,
+  --   crossLane : the horizontal lane between block A's two rows
+  aisle JSONB NOT NULL DEFAULT '{"entrance":{"x":1505,"y":1005},"trunk":{"x":1505,"y0":560,"y1":1005},"crossLane":{"y":560,"x0":150,"x1":1505}}'::jsonb,
   labels JSONB NOT NULL DEFAULT '{"entrance":"Entrance / Exit","aisle":"Drive aisle","block_a":"Block A","side":"Side column"}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -75,79 +75,129 @@ ALTER TABLE facility_layout ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO facility_layout (id, canvas_width, canvas_height, entrance_x, entrance_y, aisle, labels)
 VALUES (
-  1, 1920, 1080, 1420, 1005,
-  '{"entrance":{"x":1420,"y":1005},"trunk":{"x":1420,"y0":240,"y1":1005},"crossLane":{"y":629,"x0":430,"x1":1420}}'::jsonb,
+  1, 1920, 1080, 1505, 1005,
+  '{"entrance":{"x":1505,"y":1005},"trunk":{"x":1505,"y0":560,"y1":1005},"crossLane":{"y":560,"x0":150,"x1":1505}}'::jsonb,
   '{"entrance":"Entrance / Exit","aisle":"Drive aisle","block_a":"Block A","side":"Side column"}'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;
 
--- 3. Seed the geometry -- desktop ParkingFloorMap.tsx FLOOR_LAYOUTS -------
-WITH layout(floor, bays, top_top, top_bot, bot_top, bot_bot, side_x0, side_x1, side_cys) AS (
-  VALUES
-    (1,
-     ARRAY[475, 547, 623, 698, 774, 849, 925, 1001, 1076, 1152, 1227, 1301]::numeric[],
-     375::numeric, 565::numeric, 693::numeric, 883::numeric,
-     1536::numeric, 1660::numeric,
-     ARRAY[273, 348, 424, 499, 575, 651, 726, 802, 877, 953]::numeric[]),
-    (2,
-     ARRAY[482, 553, 628, 702, 777, 851, 925, 1000, 1074, 1148, 1223, 1295]::numeric[],
-     378::numeric, 565::numeric, 690::numeric, 877::numeric,
-     1527::numeric, 1654::numeric,
-     ARRAY[277, 351, 426, 500, 574, 649, 723, 798, 872, 946]::numeric[]),
-    (3,
-     ARRAY[487, 557, 631, 704, 778, 851, 925, 999, 1072, 1146, 1219, 1291]::numeric[],
-     380::numeric, 565::numeric, 689::numeric, 874::numeric,
-     1521::numeric, 1649::numeric,
-     ARRAY[280, 354, 427, 501, 575, 648, 722, 796, 869, 943]::numeric[])
-),
-geo AS (
-  -- block_a: 12 top-row + 12 bottom-row bays, 60 px wide, facing the centre aisle
-  SELECT
-    l.floor,
-    'block_a'::text AS zone,
-    r.zone_row,
-    r.zone_col,
-    (l.bays[r.zone_col] - 30) AS x,
-    CASE WHEN r.zone_row = 'top' THEN l.top_top ELSE l.bot_top END AS y,
-    60 AS w,
-    CASE WHEN r.zone_row = 'top' THEN l.top_bot - l.top_top ELSE l.bot_bot - l.bot_top END AS h,
-    CASE WHEN r.zone_row = 'top' THEN 'down' ELSE 'up' END AS facing
-  FROM layout l
-  CROSS JOIN (
-    SELECT r AS zone_row, c AS zone_col
-    FROM (VALUES ('top'), ('bottom')) AS rr(r),
-         generate_series(1, 12) AS c
-  ) r
-  UNION ALL
-  -- side column: 10 bays, 50 px tall, facing the lane on their left
-  SELECT
-    l.floor,
-    'side'::text,
-    NULL::text,
-    n,
-    l.side_x0,
-    (l.side_cys[n] - 25),
-    (l.side_x1 - l.side_x0),
-    50,
-    'left'
-  FROM layout l
-  CROSS JOIN generate_series(1, 10) AS n
-)
-UPDATE slots s
-SET floor_x = g.x,
-    floor_y = g.y,
-    floor_w = g.w,
-    floor_h = g.h,
-    facing  = g.facing
-FROM geo g
-WHERE s.floor = g.floor
-  AND s.zone = g.zone
-  AND s.zone_col = g.zone_col
-  AND (s.zone_row IS NOT DISTINCT FROM g.zone_row);
+-- 3. Backfill geometry for every slot ---------------------------------------
+-- Counts are derived from the data, so this works for 207 -- or any number.
+-- Only writes rows whose floor_x is still NULL.
+DO $$
+DECLARE
+  -- block_a rectangle and side-column rectangle on the 1920x1080 canvas.
+  v_bx0 NUMERIC := 150;   v_bx1 NUMERIC := 1450;
+  v_by0 NUMERIC := 220;   v_by1 NUMERIC := 900;
+  v_sx0 NUMERIC := 1560;  v_sx1 NUMERIC := 1680;
+  v_sy0 NUMERIC := 220;   v_sy1 NUMERIC := 980;
+  v_aisle NUMERIC := 140; -- gap between block A's two rows
 
--- 4. entry_rank -- 1 = closest to the entrance (per floor), by straight-line
--- distance from the entrance to each slot's access point (the edge that
--- opens onto the aisle, given `facing`).
+  f            RECORD;
+  v_cols       INTEGER;
+  v_nrows      INTEGER;
+  v_nside      INTEGER;
+  v_collist    INTEGER[];
+  v_rowlabels  TEXT[];
+  v_bayw       NUMERIC;
+  v_rowh       NUMERIC;
+  v_yy         NUMERIC;
+  v_face       TEXT;
+  i            INTEGER;
+  j            INTEGER;
+BEGIN
+  FOR f IN SELECT DISTINCT floor FROM slots WHERE floor IS NOT NULL ORDER BY floor LOOP
+
+    -- ---- block_a: a grid, rows x columns, both read from the data --------
+    SELECT COUNT(DISTINCT zone_col)
+      INTO v_cols
+      FROM slots
+     WHERE floor = f.floor AND zone = 'block_a' AND zone_col IS NOT NULL;
+
+    IF v_cols > 0 THEN
+      SELECT array_agg(DISTINCT zone_col ORDER BY zone_col)
+        INTO v_collist
+        FROM slots
+       WHERE floor = f.floor AND zone = 'block_a' AND zone_col IS NOT NULL;
+
+      -- Rows are ordered semantically: 'top' row first, then 'bottom'. (A plain
+      -- ORDER BY would sort 'bottom' before 'top' and flip the two rows.)
+      SELECT array_agg(rr ORDER BY CASE WHEN rr = 'top' THEN 0 ELSE 1 END, rr)
+        INTO v_rowlabels
+        FROM (
+          SELECT DISTINCT COALESCE(zone_row, 'top') AS rr
+            FROM slots
+           WHERE floor = f.floor AND zone = 'block_a'
+        ) t;
+      v_nrows := COALESCE(array_length(v_rowlabels, 1), 1);
+
+      v_bayw := (v_bx1 - v_bx0) / v_cols;
+      IF v_nrows >= 2 THEN
+        v_rowh := ((v_by1 - v_by0) - v_aisle) / v_nrows;
+      ELSE
+        v_rowh := 200;   -- single-row block A: a fixed, sensible depth
+      END IF;
+
+      FOR i IN 1..v_nrows LOOP
+        IF v_nrows >= 2 THEN
+          IF i = 1 THEN v_yy := v_by0; ELSE v_yy := v_by1 - v_rowh; END IF;
+          v_face := CASE WHEN i = 1 THEN 'down' ELSE 'up' END;
+        ELSE
+          v_yy := v_by0;
+          v_face := 'down';
+        END IF;
+
+        FOR j IN 1..v_cols LOOP
+          UPDATE slots s
+             SET floor_x = v_bx0 + (j - 1) * v_bayw,
+                 floor_y = v_yy,
+                 floor_w = v_bayw,
+                 floor_h = v_rowh,
+                 facing  = v_face
+           WHERE s.floor = f.floor
+             AND s.zone = 'block_a'
+             AND s.zone_col = v_collist[j]
+             AND COALESCE(s.zone_row, 'top') = v_rowlabels[i]
+             AND s.floor_x IS NULL;
+        END LOOP;
+      END LOOP;
+    END IF;
+
+    -- ---- side: a single column of bays on the right, opening left -------
+    SELECT COUNT(DISTINCT zone_col)
+      INTO v_nside
+      FROM slots
+     WHERE floor = f.floor AND zone = 'side' AND zone_col IS NOT NULL;
+
+    IF v_nside > 0 THEN
+      SELECT array_agg(DISTINCT zone_col ORDER BY zone_col)
+        INTO v_collist
+        FROM slots
+       WHERE floor = f.floor AND zone = 'side' AND zone_col IS NOT NULL;
+
+      v_rowh := (v_sy1 - v_sy0) / v_nside;
+
+      FOR j IN 1..v_nside LOOP
+        UPDATE slots s
+           SET floor_x = v_sx0,
+               floor_y = v_sy0 + (j - 1) * v_rowh,
+               floor_w = v_sx1 - v_sx0,
+               floor_h = v_rowh,
+               facing  = 'left'
+         WHERE s.floor = f.floor
+           AND s.zone = 'side'
+           AND s.zone_col = v_collist[j]
+           AND s.floor_x IS NULL;
+      END LOOP;
+    END IF;
+
+  END LOOP;
+END $$;
+
+-- 4. entry_rank -- 1 = closest to the entrance (per floor). PWD bays are ranked
+-- first, so the PWD bays are the ones nearest the entrance. Distance is
+-- measured from the entrance to the bay's access point (the edge that opens
+-- onto the aisle, given `facing`). Only fills rows whose entry_rank is NULL.
 WITH entrance AS (
   SELECT entrance_x AS ex, entrance_y AS ey FROM facility_layout WHERE id = 1
 ),
@@ -156,6 +206,7 @@ access AS (
     s.id,
     s.floor,
     s.slot_code,
+    s.is_pwd,
     CASE
       WHEN s.facing = 'down'  THEN s.floor_x + s.floor_w / 2
       WHEN s.facing = 'up'    THEN s.floor_x + s.floor_w / 2
@@ -176,14 +227,18 @@ ranked AS (
     a.id,
     row_number() OVER (
       PARTITION BY a.floor
-      ORDER BY sqrt(power(a.ax - e.ex, 2) + power(a.ay - e.ey, 2)), a.slot_code
+      ORDER BY
+        CASE WHEN a.is_pwd THEN 0 ELSE 1 END,                     -- PWD bays first
+        sqrt(power(a.ax - e.ex, 2) + power(a.ay - e.ey, 2)),      -- then nearest
+        a.slot_code
     ) AS rn
   FROM access a CROSS JOIN entrance e
 )
 UPDATE slots s
 SET entry_rank = r.entry_rank
 FROM (SELECT id, rn AS entry_rank FROM ranked) r
-WHERE s.id = r.id;
+WHERE s.id = r.id
+  AND s.entry_rank IS NULL;
 
 -- 5. RLS on facility_layout -------------------------------------------------
 -- Any signed-in user may read the plan; only admins may change it.
@@ -535,18 +590,19 @@ COMMIT;
 --        ('floor_x','floor_y','floor_w','floor_h','facing','entry_rank');
 --   expect 6 rows.
 --
--- V2. Every slot got geometry + a rank (expect 102 / 102):
+-- V2. Every slot got geometry + a rank (expect 207 / 207 / 207):
 -- SELECT COUNT(*) FILTER (WHERE floor_x IS NOT NULL) AS with_geometry,
 --        COUNT(*) FILTER (WHERE entry_rank IS NOT NULL) AS with_rank,
 --        COUNT(*) AS total FROM slots;
 --
--- V3. Layout still matches the desktop (34 per floor):
+-- V3. 69 bays per floor (60 block_a + 9 side):
 -- SELECT floor, COUNT(*) FROM slots GROUP BY floor ORDER BY floor;
---   expect 34, 34, 34.
+--   expect 69, 69, 69.
 --
--- V4. PWD bays are block_a top-row columns 11 and 12, one pair per floor:
--- SELECT floor, slot_code FROM slots WHERE is_pwd ORDER BY floor, slot_code;
---   expect 1A11,1A12,2A11,2A12,3A11,3A12.
+-- V4. PWD bays: block_a columns 8-12 of every 12-col row, plus side 1-5.
+--     expect 30 per floor (25 block_a + 5 side), 90 total:
+-- SELECT floor, COUNT(*) FROM slots WHERE is_pwd GROUP BY floor ORDER BY floor;
+-- SELECT zone, COUNT(*) FROM slots WHERE is_pwd GROUP BY zone;
 --
 -- V5. The single layout row:
 -- SELECT canvas_width, canvas_height, entrance_x, entrance_y, aisle FROM facility_layout;
