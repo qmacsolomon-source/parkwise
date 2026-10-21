@@ -104,6 +104,14 @@ bool initCamera() {
     Serial.printf("[cam] init failed: 0x%04X\n", err);
     return false;
   }
+
+  // Some AI-Thinker boards mount the camera module upside-down - confirmed
+  // visually via a live-stream test sketch on real hardware. If your board
+  // captures right-side-up already, remove these two lines.
+  sensor_t *s = esp_camera_sensor_get();
+  s->set_vflip(s, 1);
+  s->set_hmirror(s, 1);
+
   Serial.println("[cam] ready");
   return true;
 }
