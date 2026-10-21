@@ -14,23 +14,13 @@ import Svg, {
   Circle,
   G,
   Image as SvgImage,
-  Path,
-  Polyline,
   Text as SvgText,
 } from 'react-native-svg';
-import { FloorPlanAvailabilityValue, FloorPlanLayout, FloorPlanSlot, pointAlongRoute } from '@parkwise/shared';
+import { FloorPlanAvailabilityValue, FloorPlanLayout, FloorPlanSlot } from '@parkwise/shared';
 import { useTheme } from '../contexts/AccessibilityContext';
 import { ThemeColors, radius, spacing, type as typeToken } from '../theme/tokens';
 import SegmentedControl from './SegmentedControl';
-import {
-  ENTRANCE,
-  FLOOR_IMAGES,
-  IMAGE_H,
-  IMAGE_W,
-  MapBox,
-  boxForIndex,
-  buildRouteToBox,
-} from './floorMapArt';
+import { ENTRANCE, FLOOR_IMAGES, IMAGE_H, IMAGE_W, MapBox, boxForIndex } from './floorMapArt';
 
 /**
  * The mobile floor plan.
@@ -101,7 +91,7 @@ export interface FloorPlanProps {
   onFloorChange?: (floor: number) => void;
   /** Highlighted bay (the one being considered / chosen). */
   selectedSlotId?: string | null;
-  /** Bay to draw the driving route to. */
+  /** Bay to highlight as the destination (blinking ring). */
   routeSlotId?: string | null;
   onSelectSlot?: (slot: FloorPlanSlot) => void;
   showLegend?: boolean;
@@ -162,11 +152,6 @@ export default function FloorPlan({
     () => floorSlots.find((entry) => entry.slot.slot_id === routeSlotId) ?? null,
     [floorSlots, routeSlotId]
   );
-
-  const routePoints = useMemo(() => {
-    if (!routeEntry) return null;
-    return buildRouteToBox(routeEntry.box, routeEntry.zone);
-  }, [routeEntry]);
 
   const floorImage = FLOOR_IMAGES[floor] ?? FLOOR_IMAGES[1];
 
@@ -327,15 +312,6 @@ export default function FloorPlan({
     return floors.length > 0 ? floors : [1, 2, 3];
   }, [slots]);
 
-  const polyline = routePoints ? routePoints.map((p) => `${p.x},${p.y}`).join(' ') : null;
-  const arrowHead = routePoints ? routePoints[routePoints.length - 1] : null;
-  const arrowAngle = useMemo(() => {
-    if (!routePoints || routePoints.length < 2) return 0;
-    const last = routePoints[routePoints.length - 1];
-    const prev = routePoints[routePoints.length - 2];
-    return (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI;
-  }, [routePoints]);
-
   const dimmed = !!routeEntry;
 
   const pctX = (value: number): `${number}%` => `${(value / canvasW) * 100}%`;
@@ -428,7 +404,7 @@ export default function FloorPlan({
                 );
               })}
 
-              {/* Entrance / start of the route. */}
+              {/* Entrance marker. */}
               <Circle
                 cx={ENTRANCE.x}
                 cy={ENTRANCE.y}
@@ -447,52 +423,7 @@ export default function FloorPlan({
               >
                 IN
               </SvgText>
-
-              {polyline ? (
-                <>
-                  <Polyline
-                    points={polyline}
-                    fill="none"
-                    stroke={colors.surface}
-                    strokeWidth={20}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    opacity={0.85}
-                  />
-                  <Polyline
-                    points={polyline}
-                    fill="none"
-                    stroke={colors.teal}
-                    strokeWidth={11}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeDasharray="28 20"
-                  />
-                </>
-              ) : null}
-
-              {arrowHead ? (
-                <G transform={`translate(${arrowHead.x}, ${arrowHead.y}) rotate(${arrowAngle})`}>
-                  <Path
-                    d="M -30 -20 L 10 0 L -30 20 Z"
-                    fill={colors.teal}
-                    stroke={colors.surface}
-                    strokeWidth={6}
-                  />
-                </G>
-              ) : null}
             </Svg>
-
-            {/* Layer 2 of the route guidance: travelling dot + pulsing ring. */}
-            {routePoints ? (
-              <RouteMotion
-                points={routePoints}
-                canvasW={canvasW}
-                canvasH={canvasH}
-                reduceMotion={reduceMotion}
-                colour={colors.teal}
-              />
-            ) : null}
 
             {routeEntry ? (
               <PulsingRing
@@ -502,15 +433,6 @@ export default function FloorPlan({
                 pctX={pctX}
                 pctY={pctY}
               />
-            ) : null}
-
-            {routePoints ? (
-              <View
-                style={[styles.youBadge, { left: pctX(ENTRANCE.x), top: pctY(ENTRANCE.y) }]}
-                pointerEvents="none"
-              >
-                <Text style={[typeToken('small', textScale), { color: colors.textOnDark }]}>YOU</Text>
-              </View>
             ) : null}
 
             {selectedEntry ? (
@@ -612,50 +534,6 @@ function ZoomButton({
     >
       <Text style={[typeToken('caption'), { color: colours.text }]}>{text}</Text>
     </Pressable>
-  );
-}
-
-/** Travelling marker that walks the route, unless motion is reduced. */
-function RouteMotion({
-  points,
-  canvasW,
-  canvasH,
-  reduceMotion,
-  colour,
-}: {
-  points: { x: number; y: number }[];
-  canvasW: number;
-  canvasH: number;
-  reduceMotion: boolean;
-  colour: string;
-}) {
-  const [progress, setProgress] = useState(0);
-
-  useEffect(() => {
-    if (reduceMotion) {
-      setProgress(1);
-      return;
-    }
-    const timer = setInterval(() => {
-      setProgress((current) => (current >= 1 ? 0 : Math.min(current + 0.016, 1)));
-    }, 60);
-    return () => clearInterval(timer);
-  }, [reduceMotion]);
-
-  const point = pointAlongRoute(points, progress);
-
-  return (
-    <View
-      pointerEvents="none"
-      style={[
-        styles.motionDot,
-        {
-          backgroundColor: colour,
-          left: `${(point.x / canvasW) * 100}%`,
-          top: `${(point.y / canvasH) * 100}%`,
-        },
-      ]}
-    />
   );
 }
 
@@ -791,27 +669,10 @@ const styles = StyleSheet.create({
     bottom: spacing.sm,
     textAlign: 'center',
   },
-  motionDot: {
-    position: 'absolute',
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    marginLeft: -7,
-    marginTop: -7,
-  },
   pulseRing: {
     position: 'absolute',
     borderWidth: 3,
     borderRadius: radius.sm,
-  },
-  youBadge: {
-    position: 'absolute',
-    paddingHorizontal: spacing.xs,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    backgroundColor: 'rgba(15, 42, 74, 0.85)',
-    marginLeft: -18,
-    marginTop: -46,
   },
   callout: {
     position: 'absolute',

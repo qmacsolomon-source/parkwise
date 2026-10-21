@@ -25,9 +25,11 @@ interface ActiveBooking {
 }
 
 /**
- * "Show me the way": the floor plan with the driving route to the booked bay,
- * the pulsing YOU marker and the written directions. Reached from Home and
- * from the Timer.
+ * "Show me the way": the floor plan with the booked bay highlighted by a
+ * pulsing ring. No drawn route line - the facility artwork's own aisle
+ * arrows are the wayfinding, and a separately-computed path line was
+ * removed because it could disagree with them. Reached from Home and from
+ * the Timer.
  */
 export default function WayfindingScreen() {
   const navigation = useNavigation();
