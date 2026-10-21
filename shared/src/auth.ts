@@ -251,10 +251,14 @@ export const authService = {
     return data;
   },
 
-  // Reset password
+  // Reset password. Without an explicit redirectTo, this falls back to the
+  // project's Site URL - which is the "you're verified" sign-up confirmation
+  // page, not anywhere a customer can actually type a new password. Reads
+  // EXPO_PUBLIC_RESET_PASSWORD_URL (web/reset-password.html, once deployed)
+  // so the two flows land on their own correct pages.
   async resetPassword(email: string, redirectTo?: string) {
     if (!supabase || !isConfigured) throw new Error('Supabase is not configured');
-    const redirectUrl = redirectTo || '';
+    const redirectUrl = redirectTo || process.env.EXPO_PUBLIC_RESET_PASSWORD_URL || undefined;
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl,
     });

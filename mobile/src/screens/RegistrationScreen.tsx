@@ -15,7 +15,7 @@ import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/AccessibilityContext';
 import { radius, spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
-import { Button, Card, TextField, ScreenHeader } from '../components/ui';
+import { Button, Card, TextField, ScreenHeader, BottomSheet } from '../components/ui';
 import { DEFAULT_VEHICLE_TYPE, normalizePlate, plateError } from '../services/vehicles';
 
 type RootStackParamList = {
@@ -77,6 +77,7 @@ export default function RegistrationScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isPwd, setIsPwd] = useState(false);
   const [acceptTerms, setAcceptTerms] = useState(false);
+  const [termsOpen, setTermsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -355,6 +356,22 @@ export default function RegistrationScreen() {
                 disabled={loading}
                 onPress={() => setAcceptTerms((value) => !value)}
               />
+              <Pressable
+                onPress={() => setTermsOpen(true)}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="View the Terms and Conditions"
+              >
+                <Text
+                  style={[
+                    typeToken('small', textScale),
+                    styles.termsLink,
+                    { color: colors.navy },
+                  ]}
+                >
+                  View Terms and Conditions
+                </Text>
+              </Pressable>
               {errors.terms ? (
                 <Text
                   style={[typeToken('small', textScale), { color: colors.danger }]}
@@ -391,9 +408,71 @@ export default function RegistrationScreen() {
           </Card>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <BottomSheet
+        visible={termsOpen}
+        onClose={() => setTermsOpen(false)}
+        title="Terms and Conditions"
+        footer={
+          <Button label="Close" onPress={() => setTermsOpen(false)} style={styles.sheetButton} />
+        }
+      >
+        <ScrollView style={styles.termsScroll}>
+          {TERMS_SECTIONS.map((section) => (
+            <View key={section.heading} style={styles.termsSection}>
+              <Text style={[typeToken('bodyStrong', textScale), { color: colors.text }]}>
+                {section.heading}
+              </Text>
+              <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
+                {section.body}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+      </BottomSheet>
     </SafeAreaView>
   );
 }
+
+interface TermsSection {
+  heading: string;
+  body: string;
+}
+
+const TERMS_SECTIONS: TermsSection[] = [
+  {
+    heading: '1. Your account',
+    body: 'You are responsible for the accuracy of the name, phone number and plate number on your account, and for keeping your password confidential. Staff may ask you to confirm your identity when picking up a reservation.',
+  },
+  {
+    heading: '2. Reservations',
+    body: 'A reservation holds a bay for the time window you set. Arriving outside that window, or with a vehicle that does not match the plate on the booking, may result in the reservation being cancelled or reassigned by staff.',
+  },
+  {
+    heading: '3. Cancellations, no-shows and overstays',
+    body: 'Cancelling close to your reservation start time, not showing up at all, or staying past your reserved end time may each incur a fee. Current rates are shown in the app before you confirm a booking and are set by facility management, not by this app.',
+  },
+  {
+    heading: '4. Payment',
+    body: 'Charges and penalties are settled on-site at the attendant counter, not inside this app. An unpaid penalty may prevent you from booking a new reservation or closing your account until it is settled.',
+  },
+  {
+    heading: '5. PWD verification',
+    body: 'If you indicate that you have a PWD permit, you will be asked to submit your permit number and a photo of it. Staff review and verify this before PWD bays are offered to you first - checking the box does not verify you automatically, and the photo is only ever visible to you and facility staff.',
+  },
+  {
+    heading: '6. Vehicle monitoring',
+    body: 'Parking bays are monitored by camera for plate verification and occupancy detection as part of normal facility operation. This is used to confirm that the vehicle in a bay matches an active reservation.',
+  },
+  {
+    heading: '7. Liability',
+    body: 'This app helps you reserve and locate a parking bay. It does not insure your vehicle or its contents against damage, loss or theft while parked at the facility.',
+  },
+  {
+    heading: '8. Account closure',
+    body: 'You may request account closure from Settings at any time. Staff review the request before anything is removed, and any unpaid penalty must be settled first.',
+  },
+];
 
 const styles = StyleSheet.create({
   safe: {
@@ -466,5 +545,20 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  termsLink: {
+    textDecorationLine: 'underline',
+    marginLeft: TOUCH_TARGET + spacing.sm,
+    marginTop: -spacing.xxs,
+  },
+  termsScroll: {
+    maxHeight: 420,
+  },
+  termsSection: {
+    gap: spacing.xxs,
+    marginBottom: spacing.md,
+  },
+  sheetButton: {
+    flex: 1,
   },
 });
