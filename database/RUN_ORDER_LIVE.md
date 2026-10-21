@@ -166,6 +166,25 @@ SELECT COUNT(*) FROM pg_publication_tables
 
 Expected: `1`.
 
+### `07_vehicles_is_active.sql` — fixes "column vehicle.is_active does not exist"
+
+Adds `vehicles.is_active` (every existing vehicle backfilled to `true`) and
+changes `reservations.vehicle_id`'s foreign key from `ON DELETE CASCADE` to
+`ON DELETE RESTRICT`, so a vehicle with booking history can never be
+hard-deleted by anything — the app already archives those instead.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_schema='public' AND table_name='vehicles' AND column_name='is_active';
+SELECT confdeltype FROM pg_constraint WHERE conname = 'reservations_vehicle_id_fkey';
+```
+
+Expected: one column row, and `confdeltype = 'r'` (RESTRICT, not `'c'` for CASCADE).
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -196,6 +215,10 @@ WITH r AS (
               WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
   UNION ALL SELECT 'profiles realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
               WHERE pubname = 'supabase_realtime' AND tablename = 'profiles'
+  UNION ALL SELECT 'vehicles.is_active column', COUNT(*)::text, (COUNT(*) = 1) FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='vehicles' AND column_name='is_active'
+  UNION ALL SELECT 'vehicle FK is RESTRICT', confdeltype::text, (confdeltype = 'r') FROM pg_constraint
+              WHERE conname = 'reservations_vehicle_id_fkey'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -215,6 +238,8 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `pwd-permits bucket policy` = **1**
 - `pwd_intent column` = **1**
 - `profiles realtime` = **1**
+- `vehicles.is_active column` = **1**
+- `vehicle FK is RESTRICT` → `ok = true`
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 
