@@ -50,7 +50,15 @@ class SlotAgent:
             if db_state:
                 self.state = AgentState(db_state['state'])
                 self.expected_plate = db_state.get('expected_plate')
-                self.accepted_at = db_state.get('accepted_at')
+                # Supabase returns timestamp columns as ISO strings, not
+                # datetime objects - accept_vehicle() sets this field as a
+                # real datetime, so get_state_dict()'s .isoformat() call
+                # crashes on an agent reloaded from the database unless this
+                # is parsed back into one here.
+                accepted_at_raw = db_state.get('accepted_at')
+                self.accepted_at = (
+                    datetime.fromisoformat(accepted_at_raw) if accepted_at_raw else None
+                )
                 self.detected_plate = db_state.get('detected_plate')
                 self.confidence = db_state.get('confidence', 0.0)
                 self.reservation_id = await self._get_active_reservation_id()

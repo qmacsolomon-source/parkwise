@@ -100,7 +100,13 @@ class PlateRecognizer:
             return "", 0.0
 
         try:
-            results = self.ocr_reader.readtext(plate_image)
+            # Restrict to the plate alphabet (A-Z, 0-9) rather than general
+            # text - cuts out misreads from background clutter, screen glare
+            # artifacts, or stray marks getting picked up as "characters".
+            results = self.ocr_reader.readtext(
+                plate_image,
+                allowlist="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+            )
 
             if not results:
                 logger.debug("No text detected in plate region")
