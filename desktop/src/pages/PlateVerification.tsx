@@ -177,6 +177,28 @@ export default function PlateVerification() {
     }
   };
 
+  const handleConfirmMatch = async () => {
+    if (!selectedSlot) return;
+
+    setActionLoading(true);
+    try {
+      const response = await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot.id}/confirm`, {
+        method: 'POST',
+      });
+
+      if (!response.ok) throw new Error('Failed to confirm vehicle');
+
+      setSuccessMessage(`Vehicle confirmed for slot ${selectedSlot.slot_code}.`);
+      setTimeout(() => setSuccessMessage(''), 4000);
+      loadData();
+    } catch (error) {
+      console.error('Error confirming vehicle:', error);
+      await dialog.alert('Failed to confirm vehicle');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleRetryCapture = async () => {
     if (!selectedSlot) return;
 
@@ -501,6 +523,23 @@ export default function PlateVerification() {
                   {!selectedReservation && (
                     <p className="text-xs text-amber-600 -mt-2">
                       Select a reservation above first.
+                    </p>
+                  )}
+
+                  {['waiting', 'verifying', 'alert'].includes(agentStates[selectedSlot.id]?.state || '') && (
+                    <button
+                      onClick={handleConfirmMatch}
+                      disabled={actionLoading}
+                      className="btn-primary w-full flex items-center justify-center gap-2 bg-green-600 hover:bg-green-700"
+                    >
+                      <CheckCircle size={18} />
+                      Confirm Match (from photo)
+                    </button>
+                  )}
+                  {['verifying', 'alert'].includes(agentStates[selectedSlot.id]?.state || '') && (
+                    <p className="text-xs text-amber-600 -mt-2">
+                      Automatic read wasn't confident enough to verify on its own.
+                      Check the photo on the left - if it's correct, confirm it manually.
                     </p>
                   )}
 

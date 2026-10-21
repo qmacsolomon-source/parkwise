@@ -13,6 +13,12 @@ class Settings(BaseSettings):
     overstay_check_interval_seconds: int = 30
     fuzzy_match_threshold: float = 0.85
     max_retry_attempts: int = 3
+    # A matched plate only auto-verifies without an attendant if the OCR read
+    # was at least this confident. Below it, the frame still gets shown live
+    # on the attendant's screen (photo + detected text) - they confirm it by
+    # eye via POST /agents/{slot_id}/confirm instead of the agent trusting a
+    # shaky read on its own.
+    auto_verify_confidence_threshold: float = 0.6
     frame_storage_bucket: str = "frames"
     
     # ESP32-CAM hardware

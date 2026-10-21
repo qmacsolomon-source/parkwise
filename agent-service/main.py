@@ -176,6 +176,26 @@ async def release_vehicle(slot_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/agents/{slot_id}/confirm")
+async def confirm_vehicle(slot_id: str):
+    """
+    Attendant manually confirms the vehicle from the live photo, overriding
+    the OCR match/confidence check. Used when the detected plate either
+    didn't match or wasn't read confidently enough to auto-verify, but the
+    attendant can see from the camera frame that it's correct.
+    """
+    try:
+        logger.info("Vehicle confirm request", slot_id=slot_id)
+
+        await agent_manager.confirm_vehicle(slot_id)
+
+        return JSONResponse(content={"status": "confirmed", "slot_id": slot_id})
+
+    except Exception as e:
+        logger.error("Failed to confirm vehicle", slot_id=slot_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/agents/{slot_id}/state")
 async def get_agent_state(slot_id: str):
     """

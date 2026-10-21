@@ -222,14 +222,19 @@ class SlotAgent:
         
         # Check match
         match = is_match(self.detected_plate, self.expected_plate)
-        
-        if match:
-            # Plate matches - verify
+
+        if match and self.confidence >= settings.auto_verify_confidence_threshold:
+            # Plate matches and the OCR read was confident - verify automatically
             await self._verify_success()
         else:
-            # No match - check retry count
+            # Either no match, or it matched on a low-confidence read we don't
+            # trust alone. Either way this frame doesn't auto-verify - the
+            # attendant sees the live photo + detected text on their screen
+            # and can call confirm_vehicle() to accept it by eye, so a bad
+            # OCR read doesn't block an otherwise-correct vehicle for the
+            # full retry window.
             self.retry_count += 1
-            
+
             if self.retry_count >= settings.max_retry_attempts:
                 # Max retries reached - raise alert
                 await self._raise_alert("max_retries")
@@ -239,6 +244,17 @@ class SlotAgent:
                 await Database.update_agent_state(self.slot_id, {
                     'state': self.state.value
                 })
+
+    async def confirm_vehicle(self):
+        """
+        Attendant manually confirms the vehicle from the live photo,
+        overriding the OCR/confidence gate in _verify_plate(). Used when the
+        camera's last frame looks correct to a human but the detected plate
+        either didn't match or wasn't read confidently enough to auto-verify.
+        """
+        logger.info("Vehicle manually confirmed by attendant", slot_id=self.slot_id,
+                    detected=self.detected_plate, expected=self.expected_plate)
+        await self._verify_success()
     
     async def _verify_success(self):
         """Handle successful verification."""

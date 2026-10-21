@@ -76,6 +76,11 @@ class AgentManager:
         """Release vehicle from specific slot."""
         agent = self.get_agent(slot_id)
         await agent.release_vehicle()
+
+    async def confirm_vehicle(self, slot_id: str):
+        """Attendant manually confirms vehicle for specific slot."""
+        agent = self.get_agent(slot_id)
+        await agent.confirm_vehicle()
     
     async def get_agent_state(self, slot_id: str) -> dict:
         """Get state of specific agent."""
