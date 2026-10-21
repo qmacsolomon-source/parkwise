@@ -6,6 +6,11 @@ import { useNavigation, useRoute, useFocusEffect, NavigationProp } from '@react-
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authService, supabase, getPwdPermitPhotoUrl } from '@parkwise/shared';
 import { uploadMyPwdPermitPhoto } from '../utils/pwdPermitPhoto';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  NOTIFICATION_PREFS_KEY,
+  NotificationPrefs,
+} from '../utils/notificationPrefs';
 
 import AppScreen from '../components/AppScreen';
 import SegmentedControl from '../components/SegmentedControl';
@@ -38,18 +43,6 @@ const TEXT_SIZE_OPTIONS: { label: string; value: TextSize }[] = [
   { label: 'Large', value: 'large' },
 ];
 
-/** Notification choices are stored on the device (there is no push service yet). */
-const NOTIFICATION_PREFS_KEY = '@parkwise/notification-prefs:v1';
-
-interface NotificationPrefs {
-  bookingUpdates: boolean;
-  penaltyReminders: boolean;
-}
-
-const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
-  bookingUpdates: true,
-  penaltyReminders: true,
-};
 
 function formatMoney(amount: number): string {
   return `₱${amount.toLocaleString(undefined, {

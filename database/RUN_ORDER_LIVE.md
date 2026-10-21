@@ -228,6 +228,46 @@ SELECT column_name FROM information_schema.columns
 
 Expected: 3 rows.
 
+### `10_request_account_deletion.sql` — fixes Settings' "Request account deletion"
+
+`request_my_account_deletion()` existed in the repo's fresh-install script but
+was never carried into the live upgrade path — tapping "Send request" in
+Settings currently fails on the live project. Adds the function (records an
+audit-log entry for staff to action; never deletes anything itself).
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT proname FROM pg_proc WHERE proname = 'request_my_account_deletion';
+```
+
+Expected: 1 row.
+
+### `11_protect_profile_columns.sql` — SECURITY FIX, run this one first if you only run one
+
+The live database's "Users can update own profile" RLS policy only checks
+*which row* a customer can update, not *which columns* — Postgres RLS can't
+restrict that on its own. Without this trigger, any signed-in customer can
+currently grant themselves `role = 'admin'`, re-enable their own disabled
+account, or mark their own PWD permit verified, just by calling
+`profiles.update(...)` on their own row from the app. This existed in the
+fresh-install script but was never carried into live. Adds
+`protect_profile_columns()` + its trigger, which pins `role`/`status`/
+`pwd_verified` back to their existing value for anyone who isn't already
+staff.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT tgname FROM pg_trigger WHERE tgname = 'protect_profile_columns_trg';
+```
+
+Expected: 1 row.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -266,6 +306,10 @@ WITH r AS (
               WHERE pubname = 'supabase_realtime' AND tablename IN ('slots','reservations','notifications','agent_states')
   UNION ALL SELECT 'profile name-parts columns', COUNT(*)::text, (COUNT(*) = 3) FROM information_schema.columns
               WHERE table_schema='public' AND table_name='profiles' AND column_name IN ('first_name','middle_name','last_name')
+  UNION ALL SELECT 'request_my_account_deletion()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
+              WHERE proname = 'request_my_account_deletion'
+  UNION ALL SELECT 'protect_profile_columns trigger (SECURITY)', COUNT(*)::text, (COUNT(*) = 1) FROM pg_trigger
+              WHERE tgname = 'protect_profile_columns_trg'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -289,6 +333,8 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `vehicle FK is RESTRICT` → `ok = true`
 - `realtime: slots/reservations/notifications/agent_states` = **4**
 - `profile name-parts columns` = **3**
+- `request_my_account_deletion()` = **1**
+- `protect_profile_columns trigger (SECURITY)` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

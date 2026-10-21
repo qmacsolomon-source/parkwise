@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, NavigationProp } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Notification } from '@parkwise/shared';
@@ -10,6 +10,12 @@ import { radius, spacing, type as typeToken } from '../theme/tokens';
 import { Card, EmptyState, ScreenHeader, SkeletonList, StatusChip } from '../components/ui';
 import type { ChipTone } from '../components/ui';
 import AppScreen from '../components/AppScreen';
+import {
+  DEFAULT_NOTIFICATION_PREFS,
+  loadNotificationPrefs,
+  notificationAllowedByPrefs,
+  NotificationPrefs,
+} from '../utils/notificationPrefs';
 
 type RootStackParamList = {
   Notifications: undefined;
@@ -35,6 +41,21 @@ export default function NotificationsScreen() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [prefs, setPrefs] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+
+  // Re-read on every focus, not just on mount, so a preference changed in
+  // Settings applies the moment you come back to this screen.
+  useFocusEffect(
+    React.useCallback(() => {
+      let cancelled = false;
+      loadNotificationPrefs().then((loaded) => {
+        if (!cancelled) setPrefs(loaded);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
 
   useEffect(() => {
     if (!supabase) {
@@ -143,7 +164,10 @@ export default function NotificationsScreen() {
     brand: { bg: colors.tealTint, fg: colors.tealDark },
   };
 
-  const unreadCount = notifications.filter(n => !n.is_read).length;
+  const visibleNotifications = notifications.filter((n) =>
+    notificationAllowedByPrefs(n.type, prefs)
+  );
+  const unreadCount = visibleNotifications.filter(n => !n.is_read).length;
 
   return (
     <AppScreen
@@ -159,14 +183,14 @@ export default function NotificationsScreen() {
     >
       {loading ? (
         <SkeletonList rows={4} />
-      ) : notifications.length === 0 ? (
+      ) : visibleNotifications.length === 0 ? (
         <EmptyState
           icon="notifications-off-outline"
           title="No notifications"
           message="You're all caught up. We'll let you know about important updates."
         />
       ) : (
-        notifications.map(notification => {
+        visibleNotifications.map(notification => {
           const visual = TYPE_VISUAL[notification.type] ?? TYPE_VISUAL.system;
           const { bg, fg } = toneColors[visual.tone];
           const unread = !notification.is_read;
