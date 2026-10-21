@@ -4,15 +4,27 @@ python-multipart==0.0.6
 supabase==2.3.4
 torch==2.1.0
 torchvision==0.16.0
+# Loads the pretrained plate_detector.pt (see models/README.md) via the
+# yolov5 pip package's own loader - this is the loading mechanism that
+# checkpoint was actually published for, not raw torch.hub.load().
+yolov5==7.0.14
 easyocr==1.7.1
+# Pinned below numpy 2.x: torch/opencv in this list were built against
+# numpy's 1.x ABI and silently corrupt/crash under 2.x. yolov5/sahi/
+# opencv's own newer releases want numpy>=2, which is why installing
+# yolov5 keeps trying to pull it back up - don't let that happen.
 opencv-python==4.8.1.78
-numpy==1.24.3
+numpy==1.26.4
+# setuptools>=81 dropped pkg_resources, which yolov5's own utils still
+# import directly.
+setuptools<81
 Pillow==10.1.0
 python-dotenv==1.0.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
 aiofiles==23.2.1
 structlog==23.2.0
-thefuzz==0.3.1
+thefuzz==0.22.1
+# Pinned below 0.26: supabase==2.3.4's own client libraries (gotrue,
+# postgrest, storage3, supafunc) all require httpx<0.26.
 httpx==0.25.1
-asyncio==3.4.3

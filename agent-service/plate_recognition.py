@@ -1,23 +1,18 @@
 import torch
 import cv2
 import numpy as np
+import yolov5
 from easyocr import Reader
 from typing import Tuple, Optional, List
 from config import settings
 from logger import get_logger
 from pathlib import Path
-import sys
 
 logger = get_logger(__name__)
 
-# Add YOLOv5 to path for local model loading
-yolov5_path = Path(__file__).parent.parent / "third_party" / "yolov5"
-if yolov5_path.exists():
-    sys.path.insert(0, str(yolov5_path))
-
 
 class PlateRecognizer:
-    """License plate recognition using YOLOv5 + EasyOCR."""
+    """License plate recognition using YOLOv5 (via the yolov5 pip package) + EasyOCR."""
 
     def __init__(self):
         self.yolo_model = None
@@ -29,31 +24,19 @@ class PlateRecognizer:
     def _load_models(self):
         """Load YOLOv5 and EasyOCR models."""
         try:
-            # Load YOLOv5 model from local file if available, otherwise from hub
+            # yolov5.load() takes either a local .pt path or a Hugging Face
+            # repo id, and returns the same AutoShape-wrapped model either
+            # way - this is the loader the pretrained plate_detector.pt was
+            # actually published for (see models/README.md), not the raw
+            # ultralytics/yolov5 repo's DetectMultiBackend, which expects a
+            # different checkpoint format and isn't what this file is.
             model_path = Path(settings.yolo_model_path)
             if model_path.exists():
                 logger.info(f"Loading local YOLOv5 model from {model_path}")
-                try:
-                    from models.common import DetectMultiBackend
-                    self.yolo_model = DetectMultiBackend(
-                        str(model_path),
-                        device=self.device,
-                        dnn=False,
-                        fp16=False
-                    )
-                    self.yolo_model.half() if self.device == 'cuda' else None
-                    self.yolo_model.eval()
-                    logger.info("Local YOLOv5 model loaded successfully")
-                except Exception as e:
-                    logger.warning(f"Failed to load local model, falling back to hub: {e}")
-                    self.yolo_model = torch.hub.load('ultralytics/yolov5', 'custom',
-                                                     path=str(model_path),
-                                                     device=self.device)
+                self.yolo_model = yolov5.load(str(model_path), device=self.device)
             else:
-                logger.info(f"Model file not found at {model_path}, using yolov5s.pt from hub")
-                self.yolo_model = torch.hub.load('ultralytics/yolov5', 'custom',
-                                                 path='yolov5s.pt',
-                                                 device=self.device)
+                logger.info(f"Model file not found at {model_path}, using the pretrained plate detector from the hub")
+                self.yolo_model = yolov5.load('keremberke/yolov5m-license-plate', device=self.device)
 
             self.yolo_model.conf = 0.5  # Confidence threshold
             self.yolo_model.iou = 0.45  # NMS IOU threshold
@@ -67,7 +50,7 @@ class PlateRecognizer:
             logger.error("Failed to load models", error=str(e))
             # Don't raise - allow the service to start without models
             logger.warning("Plate recognition will not be available")
-    
+
     def detect_plate(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
         """
         Detect license plate in image using YOLOv5.
@@ -78,68 +61,30 @@ class PlateRecognizer:
             return None
 
         try:
-            # Convert BGR to RGB
-            img = image[..., ::-1]
-            img = np.ascontiguousarray(img)
+            results = self.yolo_model(image)
+            detections = results.pandas().xyxy[0]
 
-            # Run inference
-            if hasattr(self.yolo_model, 'forward'):
-                # Local model loading path
-                img = torch.from_numpy(img).to(self.device).float() / 255.0
-                if img.ndimension() == 3:
-                    img = img.unsqueeze(0)
+            # Filter for license plate class (class 0)
+            plate_detections = detections[detections['class'] == 0]
 
-                # Inference
-                pred = self.yolo_model(img, augment=False, visualize=False)
+            if len(plate_detections) == 0:
+                logger.debug("No plate detected")
+                return None
 
-                # Process predictions
-                from utils.general import non_max_suppression, scale_boxes
-                pred = non_max_suppression(pred, 0.5, 0.45, None, False, max_det=1000)
+            # Get the highest confidence detection
+            best_detection = plate_detections.loc[plate_detections['confidence'].idxmax()]
 
-                if pred is not None and len(pred):
-                    for det in pred:
-                        if det is not None and len(det):
-                            # Scale boxes back to original image
-                            det[:, :4] = scale_boxes(img.shape[2:], det[:, :4], img.shape).round()
+            x1, y1, x2, y2 = int(best_detection['xmin']), int(best_detection['ymin']), \
+                             int(best_detection['xmax']), int(best_detection['ymax'])
 
-                            # Get highest confidence detection
-                            best_det = det[det[:, 4].argmax()]
-                            x1, y1, x2, y2 = best_det[:4].tolist()
-
-                            logger.debug("Plate detected", bbox=(x1, y1, x2, y2),
-                                        confidence=float(best_det[4]))
-                            return (int(x1), int(y1), int(x2), int(y2))
-            else:
-                # Hub model loading path
-                results = self.yolo_model(image)
-
-                # Get detections
-                detections = results.pandas().xyxy[0]
-
-                # Filter for license plate class (class 0)
-                plate_detections = detections[detections['class'] == 0]
-
-                if len(plate_detections) == 0:
-                    logger.debug("No plate detected")
-                    return None
-
-                # Get the highest confidence detection
-                best_detection = plate_detections.loc[plate_detections['confidence'].idxmax()]
-
-                x1, y1, x2, y2 = int(best_detection['xmin']), int(best_detection['ymin']), \
-                                 int(best_detection['xmax']), int(best_detection['ymax'])
-
-                logger.debug("Plate detected", bbox=(x1, y1, x2, y2),
-                            confidence=float(best_detection['confidence']))
-                return (x1, y1, x2, y2)
-
-            logger.debug("No plate detected")
-            return None
+            logger.debug("Plate detected", bbox=(x1, y1, x2, y2),
+                        confidence=float(best_detection['confidence']))
+            return (x1, y1, x2, y2)
 
         except Exception as e:
             logger.error("Plate detection failed", error=str(e))
             return None
-    
+
     def crop_plate(self, image: np.ndarray, bbox: Tuple[int, int, int, int]) -> np.ndarray:
         """Crop plate region from image."""
         x1, y1, x2, y2 = bbox
@@ -161,9 +106,11 @@ class PlateRecognizer:
                 logger.debug("No text detected in plate region")
                 return "", 0.0
 
-            # Get the highest confidence result
+            # Get the highest confidence result. readtext() returns
+            # (bbox, text, confidence) tuples - text is index 1, not 0
+            # (index 0 is the bounding box's own corner coordinates).
             best_result = max(results, key=lambda x: x[2])
-            text = best_result[0]
+            text = best_result[1]
             confidence = float(best_result[2])
 
             logger.debug("Plate text detected", text=text, confidence=confidence)

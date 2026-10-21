@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     frame_storage_bucket: str = "frames"
     
     # Model Configuration
-    yolo_model_path: str = "models/yolov5s.pt"
+    # Pretrained license-plate detector (YOLOv5m fine-tuned on plates), not
+    # a generic COCO yolov5s - see models/README.md for where it came from.
+    yolo_model_path: str = "models/plate_detector.pt"
     ocr_gpu: bool = True
     
     # Server Configuration
