@@ -633,6 +633,15 @@ Also found and fixed a real but lower-stakes gap: Settings' "Booking updates" / 
 
 One thing noticed but deliberately NOT changed: `authService.logAudit()` requires an authenticated `auth.uid()` to write a row, but `login_attempt`/`login_failed` are both logged *before* that exists - so those two audit actions have never actually been recorded (only `login_success` works, since a session exists by then). Fixing this needs an anonymous-insertable path into `audit_log`, which opens new abuse surface (anyone, signed in or not, could write rows) that needs a deliberate scoping decision - flagging it rather than quietly building that without discussing the tradeoff first.
 
+## Round 42: closed a gap Round 38's own name-split change opened
+
+Checked `DashboardScreen.tsx` and `SettingsScreen.tsx` fully while continuing the screen-by-screen pass - both were otherwise solid. Two small follow-ups from the name split (Round 38):
+
+- `DashboardScreen.tsx`'s greeting derived "first name" by splitting `full_name` on spaces, which breaks for a multi-word first name (e.g. "Mary Grace" -> shows "Mary"). Now prefers the real `profile.first_name` column directly, falling back to the old split-on-space behaviour only for older profiles that don't have it.
+- That fix would have been inconsistent with `SettingsScreen.tsx`'s "Edit profile," which still only had a single "Full name" field - editing it there updated `full_name` but left `first_name`/`middle_name`/`last_name` stale, so the Dashboard greeting could silently go out of sync with whatever name the customer last set. Split Settings' edit sheet into the same First / Middle (optional) / Surname fields as Registration, saving all four columns together. For a profile that predates the split (`first_name` still null), opening the editor best-effort splits the existing `full_name` into parts first, so nobody sees blank fields the first time they edit their name after this change.
+
+`mobile` typechecks clean; web bundle verified.
+
 ## Round 26: two real bugs found while actually running the mobile app, both local-only fixes (Marga's files, not pushed)
 
 Testing sign-up end-to-end surfaced a bug worse than the one Round 19 fixed: `mobile/src/contexts/AuthContext.tsx`'s `register()` checked only `if (result.user)` before marking the app "signed in" - but Supabase's `signUp()` always returns a `user` object the instant the account is created, whether or not email confirmation is required, and only returns an actual `session` (a real access token) when it isn't. With confirmation genuinely on, this meant the app swapped straight into the main screens with **no valid session at all**, before the Registration screen's own "check your email" message ever got a chance to show - and every database call right after (profile creation, vehicle creation, `ensure_my_profile`) failed outright, since there was no authenticated token behind any of them. Fixed by checking `result.user && result.session` instead, so the app only signs in when there's an actual session; otherwise it correctly falls through to the existing "check your email to verify your account" screen.
