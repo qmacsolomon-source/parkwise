@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   LayoutDashboard,
   ShieldCheck,
-  DollarSign,
+  Banknote,
   FileText,
   UserPlus,
   MapPin,
@@ -45,7 +45,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
     { path: '/reports', label: 'Reports', icon: FileText, adminOnly: true },
     { path: '/account-creation', label: 'Account Creation', icon: UserPlus, adminOnly: true },
     { path: '/user-management', label: 'User Management', icon: FileText, adminOnly: true },
-    { path: '/rates-and-pricing', label: 'Rates & Pricing', icon: DollarSign, adminOnly: true },
+    { path: '/rates-and-pricing', label: 'Rates & Pricing', icon: Banknote, adminOnly: true },
   ];
 
   const filteredNavItems = navItems.filter(item => !item.adminOnly || isAdmin);

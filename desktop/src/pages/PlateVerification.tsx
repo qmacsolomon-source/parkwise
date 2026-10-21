@@ -382,15 +382,27 @@ export default function PlateVerification() {
             className="input"
           >
             <option value="">-- Select a slot --</option>
-            {groupSlotsByFloor(slots).map(group => (
-              <optgroup key={group.floor} label={`Floor ${group.floor}`}>
-                {group.slots.map(slot => (
-                  <option key={slot.id} value={slot.id}>
-                    {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
+            {groupSlotsByFloor(slots).map(group => {
+              // This dropdown is for finding a slot that needs attendant
+              // action right now - with 69 slots per floor and most of them
+              // 'available' on any given day, the handful actually occupied
+              // (or reserved/unverified/under maintenance) were buried
+              // dozens of rows down in plain physical-layout order. A
+              // stable sort keeps that same physical order within each
+              // bucket, just floats anything not 'available' to the top.
+              const sortedSlots = [...group.slots].sort(
+                (a, b) => Number(a.status === 'available') - Number(b.status === 'available')
+              );
+              return (
+                <optgroup key={group.floor} label={`Floor ${group.floor}`}>
+                  {sortedSlots.map(slot => (
+                    <option key={slot.id} value={slot.id}>
+                      {slot.slot_code} - {slot.status} {slot.is_pwd ? '(PWD)' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
           </select>
         </div>
 

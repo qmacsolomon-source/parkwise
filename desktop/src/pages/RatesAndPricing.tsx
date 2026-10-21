@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
 import { Rate } from '@parkwise/shared';
 import {
-  DollarSign, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
+  Banknote, AlertTriangle, CheckCircle, LogOut, Volume2, VolumeX,
   RotateCcw, History, Clock, Shield
 } from 'lucide-react';
 
@@ -290,7 +290,7 @@ export default function RatesAndPricing() {
       <header className="bg-surface shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <DollarSign className="text-primary" size={24} />
+            <Banknote className="text-primary" size={24} />
             <div>
               <h1 className="text-xl font-bold text-primary">Rates and Pricing</h1>
               <p className="text-sm text-gray-600">Manage Parking Rates</p>
@@ -534,7 +534,7 @@ export default function RatesAndPricing() {
           <div className="card max-w-md w-full mx-4">
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <DollarSign className="text-blue-600" size={32} />
+                <Banknote className="text-blue-600" size={32} />
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Confirm Rate Changes</h3>
               <p className="text-gray-600">

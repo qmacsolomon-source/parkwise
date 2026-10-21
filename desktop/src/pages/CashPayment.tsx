@@ -6,7 +6,7 @@ import { usePersistedState } from '../hooks/usePersistedState';
 import { supabase } from '@parkwise/shared';
 import { Slot, Reservation, Rate, Penalty, Profile, Vehicle } from '@parkwise/shared';
 import {
-  DollarSign, AlertTriangle, CheckCircle,
+  Banknote, AlertTriangle, CheckCircle,
   Receipt, Printer, RefreshCw, LogOut, Volume2, VolumeX
 } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -424,7 +424,7 @@ export default function CashPayment() {
       <header className="bg-surface shadow-sm border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <DollarSign className="text-primary" size={24} />
+            <Banknote className="text-primary" size={24} />
             <div>
               <h1 className="text-xl font-bold text-primary">Cash Payment</h1>
               <p className="text-sm text-gray-600">Welcome, {profile?.full_name}</p>
@@ -510,7 +510,7 @@ export default function CashPayment() {
           {/* Right: Payment Details */}
           <div className="card">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <DollarSign size={20} />
+              <Banknote size={20} />
               Payment Details
             </h2>
 

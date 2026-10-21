@@ -816,3 +816,17 @@ Asked what "1S3"/"1S5" meant and why accepting them wasn't visible on the Slot M
 
 - **`desktop/src/components/ParkingFloorMap.tsx`**: `renderSlot()`'s label now uses `slot.slot_code` directly instead of the synthetic `${floor}-${spotNumber}` sequence; removed the now-unused `spotNumber` parameter and its index-math at both call sites (main block, side column).
 - This is a shared component (`ParkingFloorMap`), used by both `SlotAssignment.tsx` and `LiveOccupancyDashboard.tsx` - fixing it here carries the fix to both pages' maps at once, not just the one currently being tested. `LiveOccupancyDashboard.tsx` itself was already fully consistent (search, sort, titles, detail panel all already used `slot_code`) - the map label was the one holdout.
+
+Separately, caught up two reservations that got Accept-Vehicle'd in the exact few seconds Round 55's fix was still hot-reloading into the browser (confirmed by timestamp - `agent_states.accepted_at` landed within ~20 seconds of the HMR log line) - they'd armed the camera but never flipped to `active`, and one slot's stale `current_reservation_id` (left over from testing before these fixes existed) was pointing at the wrong reservation. Set both reservations to `active` directly against the live database to match what the fixed code does now; the trigger self-corrected the stale pointer as a side effect, since it always points `current_reservation_id` at the reservation actually being activated.
+
+## Round 57: Plate Verification's slot dropdown buried the handful of occupied slots under dozens of "available" ones
+
+Asked for occupied slots to be easier to find in "Select a slot," ideally sorted to the top. With 69 slots per floor and most of them available on any given day, the plain alphabetical-by-position listing meant scrolling past dozens of identical "available" rows to find the one or two slots actually being worked on.
+
+- **`desktop/src/pages/PlateVerification.tsx`**: added a stable sort within each floor's `<optgroup>` that floats anything not `'available'` (occupied, reserved, unverified, overstay, maintenance) to the top, keeping the existing physical-layout order within each bucket. Deliberately local to this one dropdown, not a change to the shared `groupSlotsByFloor()` util (`shared/src/slotLayout.ts`) - `SlotAssignment.tsx`'s reassign-target picker uses the same util and wants *available* slots easy to find, the opposite priority, so changing the shared sort would have fixed one screen and broken the other.
+
+## Round 58: Cash Payment's header icon was a literal dollar sign
+
+Reported from a screenshot: `$` next to "Cash Payment" (and, once checked, also on "Payment Details" below it, the sidebar's "Rates & Pricing" entry, and both icons inside `RatesAndPricing.tsx`). Every actual currency *amount* in the app already correctly uses `₱` or spells out `PHP` where the glyph can't render (the PDF receipt) - this was purely an icon choice (`lucide-react`'s `DollarSign`), not a currency-formatting bug, left over from scaffolding that was never swapped for something currency-neutral.
+
+- Replaced every `DollarSign` usage with `Banknote` (a plain cash icon with no currency symbol baked in) across `desktop/src/pages/CashPayment.tsx`, `RatesAndPricing.tsx`, and `desktop/src/components/Sidebar.tsx`'s nav icon. Checked mobile too - `ReservationScreen.tsx` already uses Ionicons' `cash-outline`, which was never a problem.
