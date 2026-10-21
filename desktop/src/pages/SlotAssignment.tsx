@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '@parkwise/shared';
-import { Slot, Reservation, groupSlotsByFloor } from '@parkwise/shared';
+import { AgentState, Slot, Reservation, groupSlotsByFloor } from '@parkwise/shared';
 import ParkingFloorMap from '../components/ParkingFloorMap';
 import FloorSwitcher from '../components/FloorSwitcher';
 import {
@@ -19,6 +19,47 @@ interface ReservationWithDetails extends Reservation {
   is_pwd: boolean;
 }
 
+/**
+ * Reflects the slot's agent_states.state on the reservation card. Without
+ * this, Accept Vehicle never visibly changed anything - it doesn't touch
+ * reservations.status, so the card looked identical before and after a
+ * successful click, and nothing stopped (or explained) clicking it again.
+ */
+function cameraStatusMeta(state?: AgentState['state']): {
+  label: string;
+  className: string;
+  buttonLabel: string;
+  lockButton: boolean;
+} | null {
+  switch (state) {
+    case 'waiting':
+    case 'verifying':
+      return {
+        label: 'Camera watching',
+        className: 'bg-amber-100 text-amber-800',
+        buttonLabel: 'Camera watching...',
+        lockButton: true,
+      };
+    case 'verified':
+      return {
+        label: 'Verified',
+        className: 'bg-green-100 text-green-800',
+        buttonLabel: 'Verified',
+        lockButton: true,
+      };
+    case 'alert':
+      return {
+        label: 'Needs review',
+        className: 'bg-red-100 text-red-800',
+        buttonLabel: 'Re-accept (retry)',
+        lockButton: false,
+      };
+    case 'idle':
+    default:
+      return null;
+  }
+}
+
 export default function SlotAssignment() {
   const { profile, logout } = useAuth();
   const location = useLocation();
@@ -27,6 +68,7 @@ export default function SlotAssignment() {
   );
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reservations, setReservations] = useState<ReservationWithDetails[]>([]);
+  const [agentStates, setAgentStates] = useState<Record<string, AgentState>>({});
   const [loading, setLoading] = useState(true);
   const [reassigning, setReassigning] = useState(false);
   const [checkingInId, setCheckingInId] = useState<string | null>(null);
@@ -63,14 +105,44 @@ export default function SlotAssignment() {
       })
       .subscribe();
 
+    // So "Accept Vehicle" actually shows something once clicked - without
+    // this, the card has no way to reflect that the slot's agent is now
+    // armed and watching, since Accept Vehicle never changes the
+    // reservation's own status (that only happens on release/verification).
+    const agentStatesSubscription = supabase
+      .channel('slot-assignment-agent-states-changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'agent_states' }, (payload) => {
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          setAgentStates((prev) => ({
+            ...prev,
+            [(payload.new as AgentState).slot_id]: payload.new as AgentState,
+          }));
+        }
+      })
+      .subscribe();
+
     return () => {
       slotsSubscription.unsubscribe();
       reservationsSubscription.unsubscribe();
+      agentStatesSubscription.unsubscribe();
     };
   }, []);
 
   const loadData = async () => {
-    await Promise.all([loadSlots(), loadReservations()]);
+    await Promise.all([loadSlots(), loadReservations(), loadAgentStates()]);
+  };
+
+  const loadAgentStates = async () => {
+    try {
+      const { data } = await supabase.from('agent_states').select('*');
+      const next: Record<string, AgentState> = {};
+      (data || []).forEach((state: AgentState) => {
+        next[state.slot_id] = state;
+      });
+      setAgentStates(next);
+    } catch (error) {
+      console.error('Error loading agent states:', error);
+    }
   };
 
   const loadSlots = async () => {
@@ -419,7 +491,11 @@ export default function SlotAssignment() {
             <div className="text-center py-8 text-gray-500">No reservations found</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[600px] overflow-y-auto">
-              {reservations.map((reservation) => (
+              {reservations.map((reservation) => {
+                const agentState = agentStates[reservation.slot_id];
+                const camera = cameraStatusMeta(agentState?.state);
+
+                return (
                 <div
                   key={reservation.id}
                   className="p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
@@ -438,6 +514,11 @@ export default function SlotAssignment() {
                         {reservation.is_pwd && (
                           <span className="px-2 py-0.5 text-xs rounded-full bg-purple-100 text-purple-800">
                             PWD
+                          </span>
+                        )}
+                        {camera && (
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${camera.className}`}>
+                            {camera.label}
                           </span>
                         )}
                       </div>
@@ -461,11 +542,13 @@ export default function SlotAssignment() {
                   </div>
                   <button
                     onClick={() => handleCheckIn(reservation)}
-                    disabled={checkingInId === reservation.id}
+                    disabled={checkingInId === reservation.id || camera?.lockButton}
                     className="mt-3 w-full px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle size={14} />
-                    {checkingInId === reservation.id ? 'Checking in...' : 'Accept Vehicle (start camera watch)'}
+                    {checkingInId === reservation.id
+                      ? 'Checking in...'
+                      : camera?.buttonLabel ?? 'Accept Vehicle (start camera watch)'}
                   </button>
                   <button
                     onClick={() => {
@@ -477,7 +560,8 @@ export default function SlotAssignment() {
                     Reassign
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
