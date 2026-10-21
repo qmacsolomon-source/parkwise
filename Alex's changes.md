@@ -642,6 +642,14 @@ Checked `DashboardScreen.tsx` and `SettingsScreen.tsx` fully while continuing th
 
 `mobile` typechecks clean; web bundle verified.
 
+## Round 43: full pass over every shared component - clean
+
+Per explicit instruction, read every shared UI component end to end looking for the same kind of silent breakage found in the screens: `FloorPlan.tsx` (all 969 lines, including the gesture/zoom math), `FloorPlanPicker.tsx`, `RouteGuide.tsx`, `SlotList.tsx`, `VehicleFormSheet.tsx`, `SegmentedControl.tsx`, `AppScreen.tsx`, `BottomTabBar.tsx`, `AccessibilityContext.tsx`, `useFloorPlan.ts`, and every primitive in `components/ui/` (Button, Card, TextField, ScreenHeader, Skeleton, StatusChip, EmptyState, Toast, BottomSheet).
+
+Nothing broken found - this layer is solid. The only thing worth noting: `LoginScreen.tsx` and `RegistrationScreen.tsx` each declared their own `showPassword`/`showConfirmPassword` state that was never read anywhere - `TextField` already manages its own show/hide toggle internally, so this was dead code with no functional effect (the real toggle always worked). Removed both.
+
+With this pass done, every screen and every shared component in `mobile/` has now been read end to end at least once this session.
+
 ## Round 26: two real bugs found while actually running the mobile app, both local-only fixes (Marga's files, not pushed)
 
 Testing sign-up end-to-end surfaced a bug worse than the one Round 19 fixed: `mobile/src/contexts/AuthContext.tsx`'s `register()` checked only `if (result.user)` before marking the app "signed in" - but Supabase's `signUp()` always returns a `user` object the instant the account is created, whether or not email confirmation is required, and only returns an actual `session` (a real access token) when it isn't. With confirmation genuinely on, this meant the app swapped straight into the main screens with **no valid session at all**, before the Registration screen's own "check your email" message ever got a chance to show - and every database call right after (profile creation, vehicle creation, `ensure_my_profile`) failed outright, since there was no authenticated token behind any of them. Fixed by checking `result.user && result.session` instead, so the app only signs in when there's an actual session; otherwise it correctly falls through to the existing "check your email to verify your account" screen.

@@ -79,8 +79,6 @@ export default function RegistrationScreen() {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [termsOpen, setTermsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formMessage, setFormMessage] = useState<FormMessage | null>(null);
 
