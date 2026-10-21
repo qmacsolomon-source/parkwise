@@ -209,7 +209,7 @@ export default function App() {
       <AccessibilityProvider>
         <ToastProvider>
           <AppFrame>
-            <NavigationContainer>
+            <NavigationContainer ref={navigationRef}>
               <AuthProvider>
                 <AppRoutes />
                 <StatusBar style="auto" />

@@ -313,6 +313,12 @@ export default function FloorPlan({
   const cross = layout.aisle?.crossLane ?? null;
   const polyline = routePoints ? routePoints.map((p) => `${p.x},${p.y}`).join(' ') : null;
   const arrowHead = routePoints ? routePoints[routePoints.length - 1] : null;
+  const arrowAngle = useMemo(() => {
+    if (!routePoints || routePoints.length < 2) return 0;
+    const last = routePoints[routePoints.length - 1];
+    const prev = routePoints[routePoints.length - 2];
+    return (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI;
+  }, [routePoints]);
 
   const dimmed = !!routeSlot;
 
@@ -500,6 +506,17 @@ export default function FloorPlan({
                         {glyph}
                       </SvgText>
                     ) : null}
+
+                    {/* Live Occupancy Indicator (Green/Red dot) */}
+                    <Circle
+                      cx={x + w - 12}
+                      cy={y + 12}
+                      r={6}
+                      fill={slot.availability === 'available' ? colors.success : colors.danger}
+                      stroke={colors.surface}
+                      strokeWidth={2}
+                      opacity={opacity}
+                    />
                   </React.Fragment>
                 );
               })}
@@ -548,14 +565,14 @@ export default function FloorPlan({
               ) : null}
 
               {arrowHead ? (
-                <Circle
-                  cx={arrowHead.x}
-                  cy={arrowHead.y}
-                  r={24}
-                  fill={colors.teal}
-                  stroke={colors.surface}
-                  strokeWidth={8}
-                />
+                <G transform={`translate(${arrowHead.x}, ${arrowHead.y}) rotate(${arrowAngle})`}>
+                  <Path
+                    d="M -30 -20 L 10 0 L -30 20 Z"
+                    fill={colors.teal}
+                    stroke={colors.surface}
+                    strokeWidth={6}
+                  />
+                </G>
               ) : null}
             </Svg>
 
@@ -576,7 +593,7 @@ export default function FloorPlan({
                 canvasW={canvasW}
                 canvasH={canvasH}
                 reduceMotion={reduceMotion}
-                colour={colors.teal}
+                colour="#FF9500" // Bright orange for assigned slot
                 pctX={pctX}
                 pctY={pctY}
               />
@@ -763,7 +780,7 @@ function PulsingRing({
       Animated.sequence([
         Animated.timing(pulse, {
           toValue: 1,
-          duration: 1100,
+          duration: 800, // Slightly faster for "blinking" feel
           easing: Easing.out(Easing.quad),
           useNativeDriver: true,
         }),
@@ -820,6 +837,12 @@ export function FloorPlanLegend({ textScale = 1 }: { textScale?: number }) {
           >
             <Text style={styles.legendGlyph}>{entry.glyph}</Text>
           </View>
+          <View
+            style={[
+              styles.occupancyDot,
+              { backgroundColor: entry.key === 'available' ? colors.success : colors.danger },
+            ]}
+          />
           <Text style={[typeToken('small', textScale), { color: colors.text }]}>{entry.label}</Text>
         </View>
       ))}
@@ -931,6 +954,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  occupancyDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   legendGlyph: {
     fontSize: 10,
