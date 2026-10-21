@@ -6,7 +6,6 @@ import { useAuth } from '../contexts/AuthContext';
 import { useFloorPlan } from '../hooks/useFloorPlan';
 import AppScreen from '../components/AppScreen';
 import FloorPlan from '../components/FloorPlan';
-import RouteGuide from '../components/RouteGuide';
 import { EmptyState, ScreenHeader, SkeletonList } from '../components/ui';
 import { spacing } from '../theme/tokens';
 
@@ -140,12 +139,6 @@ export default function WayfindingScreen() {
             : null
         }
       />
-
-      {routeSlot ? (
-        <View style={styles.guide}>
-          <RouteGuide layout={layout} slot={routeSlot} />
-        </View>
-      ) : null}
     </AppScreen>
   );
 }
@@ -154,8 +147,5 @@ const styles = StyleSheet.create({
   padded: {
     paddingHorizontal: spacing.screen,
     paddingTop: spacing.lg,
-  },
-  guide: {
-    marginTop: spacing.md,
   },
 });

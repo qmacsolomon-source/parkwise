@@ -13,37 +13,31 @@ import {
 import Svg, {
   Circle,
   G,
-  Line,
+  Image as SvgImage,
   Path,
   Polyline,
-  Rect,
   Text as SvgText,
 } from 'react-native-svg';
-import {
-  BLOCK_A_RECT,
-  FloorPlanAvailabilityValue,
-  FloorPlanLayout,
-  FloorPlanSlot,
-  IMAGE_H,
-  IMAGE_W,
-  SIDE_RECT,
-  computeRoute,
-  hasGeometry,
-  pointAlongRoute,
-} from '@parkwise/shared';
+import { FloorPlanAvailabilityValue, FloorPlanLayout, FloorPlanSlot, pointAlongRoute } from '@parkwise/shared';
 import { useTheme } from '../contexts/AccessibilityContext';
 import { ThemeColors, radius, spacing, type as typeToken } from '../theme/tokens';
 import SegmentedControl from './SegmentedControl';
+import {
+  ENTRANCE,
+  FLOOR_IMAGES,
+  IMAGE_H,
+  IMAGE_W,
+  MapBox,
+  boxForIndex,
+  buildRouteToBox,
+} from './floorMapArt';
 
 /**
  * The mobile floor plan.
  *
- * The drawing is SCHEMATIC: every bay is a vector rectangle placed on the
- * 1920x1080 canvas by the layout data itself (the same rectangles
- * database/live_upgrade/03_floor_plan_207.sql writes into slots.floor_x etc.,
- * mirrored by shared/src/floorLayout.ts). There is no background image -- the
- * repo only has the OLD 34-bay reference drawings, which do not describe this
- * 207-bay facility, so drawing from the data is the only honest option.
+ * The background is the real facility drawing (the same artwork and
+ * hand-placed bay boxes the desktop console uses - see floorMapArt.ts), not a
+ * drawn schematic: this is the actual layout, not an abstract stand-in for it.
  *
  * Selection: one press over the whole drawing snaps to the nearest bay, and
  * the snap radius is grown so that every bay offers at least a 44 dp target
@@ -58,6 +52,14 @@ const DRAG_TOLERANCE_DP = 8;
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const SCALE_STEP = 1.6;
+/**
+ * Marker badge diameter, in canvas px. Main stalls are only ~63 px wide on
+ * the 1920 px canvas (already tiny before zooming - see SlotList's own
+ * comment on this), so the badge can't shrink too far without becoming
+ * unreadable; this is a middle ground that stays legible while leaving a
+ * visible margin of the artwork's own PWD wheelchair icon around it.
+ */
+const MARKER_SIZE = 42;
 
 export const AVAILABILITY_META: {
   key: FloorPlanAvailabilityValue;
@@ -108,9 +110,14 @@ export interface FloorPlanProps {
   style?: ViewStyle;
 }
 
+interface PositionedSlot {
+  slot: FloorPlanSlot;
+  box: MapBox;
+  zone: 'block_a' | 'side';
+}
+
 export default function FloorPlan({
   slots,
-  layout,
   floor,
   onFloorChange,
   selectedSlotId,
@@ -123,35 +130,45 @@ export default function FloorPlan({
   const { colors, textScale, reduceMotion } = useTheme();
   const [frame, setFrame] = useState({ w: 0, h: 0 });
 
-  const canvasW = layout.canvas_width || IMAGE_W;
-  const canvasH = layout.canvas_height || IMAGE_H;
+  const canvasW = IMAGE_W;
+  const canvasH = IMAGE_H;
   const aspect = canvasW / canvasH;
 
-  const floorSlots = useMemo(
-    () => slots.filter((slot) => slot.floor === floor && hasGeometry(slot)),
-    [slots, floor]
-  );
+  // Matches a bay to its box exactly how the desktop console does: every bay
+  // in a zone, sorted by column, indexed into that zone's fixed box list.
+  const floorSlots: PositionedSlot[] = useMemo(() => {
+    const onFloor = slots.filter((slot) => slot.floor === floor);
+    const positioned: PositionedSlot[] = [];
 
-  const selectedSlot = useMemo(
-    () => floorSlots.find((slot) => slot.slot_id === selectedSlotId) ?? null,
+    (['block_a', 'side'] as const).forEach((zone) => {
+      onFloor
+        .filter((slot) => slot.zone === zone)
+        .sort((a, b) => a.zone_col - b.zone_col)
+        .forEach((slot, index) => {
+          const box = boxForIndex(zone, index);
+          if (box) positioned.push({ slot, box, zone });
+        });
+    });
+
+    return positioned;
+  }, [slots, floor]);
+
+  const selectedEntry = useMemo(
+    () => floorSlots.find((entry) => entry.slot.slot_id === selectedSlotId) ?? null,
     [floorSlots, selectedSlotId]
   );
 
-  const routeSlot = useMemo(
-    () => floorSlots.find((slot) => slot.slot_id === routeSlotId) ?? null,
+  const routeEntry = useMemo(
+    () => floorSlots.find((entry) => entry.slot.slot_id === routeSlotId) ?? null,
     [floorSlots, routeSlotId]
   );
 
   const routePoints = useMemo(() => {
-    if (!routeSlot) return null;
-    const points = computeRoute(layout, routeSlot);
-    return points.length >= 2 ? points : null;
-  }, [layout, routeSlot]);
+    if (!routeEntry) return null;
+    return buildRouteToBox(routeEntry.box, routeEntry.zone);
+  }, [routeEntry]);
 
-  const availableFloors = useMemo(() => {
-    const floors = Array.from(new Set(slots.map((slot) => slot.floor))).sort((a, b) => a - b);
-    return floors.length > 0 ? floors : [1, 2, 3];
-  }, [slots]);
+  const floorImage = FLOOR_IMAGES[floor] ?? FLOOR_IMAGES[1];
 
   // --- zoom + pan ---------------------------------------------------------
   // The phone screen is far too small for 69 bays at once, so the drawing can
@@ -281,16 +298,16 @@ export default function FloorPlan({
       const canvasX = ((locationX - offsetRef.current.x) / scaleRef.current) * toCanvas;
       const canvasY = ((locationY - offsetRef.current.y) / scaleRef.current) * toCanvas;
 
-      let best: FloorPlanSlot | null = null;
+      let best: PositionedSlot | null = null;
       let bestDistance = Number.POSITIVE_INFINITY;
 
-      for (const slot of floorSlots) {
-        const centreX = (slot.floor_x ?? 0) + (slot.floor_w ?? 0) / 2;
-        const centreY = (slot.floor_y ?? 0) + (slot.floor_h ?? 0) / 2;
+      for (const entry of floorSlots) {
+        const centreX = entry.box.x + entry.box.w / 2;
+        const centreY = entry.box.y + entry.box.h / 2;
         const distance = Math.hypot(centreX - canvasX, centreY - canvasY);
         if (distance < bestDistance) {
           bestDistance = distance;
-          best = slot;
+          best = entry;
         }
       }
 
@@ -299,18 +316,17 @@ export default function FloorPlan({
       // Guarantee a >=44 dp target per bay: the tap is accepted if it lands
       // within half a 44 dp box, or anywhere inside the bay's own rectangle.
       const minRadius = (MIN_HIT_DP / 2) * toCanvas;
-      const ownRadius = Math.hypot((best.floor_w ?? 0) / 2, (best.floor_h ?? 0) / 2);
-      if (bestDistance <= Math.max(minRadius, ownRadius)) onSelectSlot(best);
+      const ownRadius = Math.hypot(best.box.w / 2, best.box.h / 2);
+      if (bestDistance <= Math.max(minRadius, ownRadius)) onSelectSlot(best.slot);
     },
     [canvasW, floorSlots, frame.w, onSelectSlot]
   );
 
-  const pctX = (value: number): `${number}%` => `${(value / canvasW) * 100}%`;
-  const pctY = (value: number): `${number}%` => `${(value / canvasH) * 100}%`;
+  const availableFloors = useMemo(() => {
+    const floors = Array.from(new Set(slots.map((slot) => slot.floor))).sort((a, b) => a - b);
+    return floors.length > 0 ? floors : [1, 2, 3];
+  }, [slots]);
 
-  const entrance = layout.aisle?.entrance ?? { x: layout.entrance_x, y: layout.entrance_y };
-  const trunk = layout.aisle?.trunk ?? null;
-  const cross = layout.aisle?.crossLane ?? null;
   const polyline = routePoints ? routePoints.map((p) => `${p.x},${p.y}`).join(' ') : null;
   const arrowHead = routePoints ? routePoints[routePoints.length - 1] : null;
   const arrowAngle = useMemo(() => {
@@ -320,7 +336,10 @@ export default function FloorPlan({
     return (Math.atan2(last.y - prev.y, last.x - prev.x) * 180) / Math.PI;
   }, [routePoints]);
 
-  const dimmed = !!routeSlot;
+  const dimmed = !!routeEntry;
+
+  const pctX = (value: number): `${number}%` => `${(value / canvasW) * 100}%`;
+  const pctY = (value: number): `${number}%` => `${(value / canvasH) * 100}%`;
 
   return (
     <View style={style}>
@@ -354,9 +373,9 @@ export default function FloorPlan({
             }
             accessibilityRole="imagebutton"
             accessibilityLabel={
-              selectedSlot
-                ? `Floor ${floor} plan. Selected ${selectedSlot.slot_code}, ${availabilityLabel(
-                    selectedSlot.availability
+              selectedEntry
+                ? `Floor ${floor} plan. Selected ${selectedEntry.slot.slot_code}, ${availabilityLabel(
+                    selectedEntry.slot.availability
                   )}.`
                 : `Floor ${floor} parking plan, ${floorSlots.length} bays. Use the List view for an exact bay.`
             }
@@ -369,170 +388,58 @@ export default function FloorPlan({
               viewBox={`0 0 ${canvasW} ${canvasH}`}
               preserveAspectRatio="xMidYMid meet"
             >
-              {/* The driving lanes, drawn from facility_layout.aisle. */}
-              <Rect x={0} y={0} width={canvasW} height={canvasH} fill={colors.surfaceAlt} />
-              <G opacity={0.75}>
-                <Rect
-                  x={BLOCK_A_RECT.x0}
-                  y={BLOCK_A_RECT.y0}
-                  width={BLOCK_A_RECT.x1 - BLOCK_A_RECT.x0}
-                  height={BLOCK_A_RECT.y1 - BLOCK_A_RECT.y0}
-                  fill="none"
-                  stroke={colors.borderStrong}
-                  strokeWidth={4}
-                  strokeDasharray="18 14"
-                />
-                <Rect
-                  x={SIDE_RECT.x0}
-                  y={SIDE_RECT.y0}
-                  width={SIDE_RECT.x1 - SIDE_RECT.x0}
-                  height={SIDE_RECT.y1 - SIDE_RECT.y0}
-                  fill="none"
-                  stroke={colors.borderStrong}
-                  strokeWidth={4}
-                  strokeDasharray="18 14"
-                />
-              </G>
-              {trunk ? (
-                <Rect
-                  x={trunk.x - 45}
-                  y={trunk.y0}
-                  width={90}
-                  height={trunk.y1 - trunk.y0}
-                  fill={colors.border}
-                  opacity={0.7}
-                />
-              ) : null}
-              {cross ? (
-                <Rect
-                  x={cross.x0}
-                  y={cross.y - 45}
-                  width={cross.x1 - cross.x0}
-                  height={90}
-                  fill={colors.border}
-                  opacity={0.7}
-                />
-              ) : null}
+              {/* The real facility drawing - same artwork and boxes as the desktop console. */}
+              <SvgImage
+                href={floorImage}
+                x={0}
+                y={0}
+                width={canvasW}
+                height={canvasH}
+                preserveAspectRatio="xMidYMid slice"
+              />
 
-              {floorSlots.map((slot) => {
-                const x = slot.floor_x ?? 0;
-                const y = slot.floor_y ?? 0;
-                const w = slot.floor_w ?? 0;
-                const h = slot.floor_h ?? 0;
+              {floorSlots.map(({ slot, box }) => {
                 const color = availabilityColor(slot.availability, colors);
                 const isSelected = slot.slot_id === selectedSlotId;
                 const isRoute = slot.slot_id === routeSlotId;
-                const opacity = dimmed && !isRoute ? 0.28 : 0.9;
+                const opacity = dimmed && !isRoute ? 0.35 : 1;
                 const glyph = AVAILABILITY_META.find((m) => m.key === slot.availability)?.glyph;
+                const cx = box.x + box.w / 2;
+                const cy = box.y + box.h / 2;
+                const r = MARKER_SIZE / 2;
 
                 return (
-                  <React.Fragment key={slot.slot_id}>
-                    <Rect
-                      x={x}
-                      y={y}
-                      width={w}
-                      height={h}
-                      rx={5}
-                      fill={color}
-                      opacity={opacity}
-                      stroke={isSelected || isRoute ? colors.navy : colors.surface}
-                      strokeWidth={isSelected || isRoute ? 9 : 3}
-                    />
-                    {/* Shape + letter, so state is never carried by colour alone. */}
-                    {slot.availability === 'reserved' ? (
-                      <Line
-                        x1={x + w * 0.22}
-                        y1={y + h / 2}
-                        x2={x + w * 0.78}
-                        y2={y + h / 2}
-                        stroke={colors.surface}
-                        strokeWidth={10}
-                        opacity={opacity}
-                      />
+                  <G key={slot.slot_id} opacity={opacity}>
+                    {isSelected || isRoute ? (
+                      <Circle cx={cx} cy={cy} r={r + 6} fill="none" stroke={colors.navy} strokeWidth={5} />
                     ) : null}
-                    {slot.availability === 'mine' ? (
-                      <Circle
-                        cx={x + w / 2}
-                        cy={y + h / 2}
-                        r={Math.min(w, h) * 0.22}
-                        fill={colors.surface}
-                        opacity={opacity}
-                      />
-                    ) : null}
-                    {slot.availability === 'maintenance' ? (
-                      <Path
-                        d={`M ${x + w * 0.24} ${y + h * 0.3} L ${x + w * 0.76} ${y + h * 0.7}`}
-                        stroke={colors.surface}
-                        strokeWidth={10}
-                        strokeLinecap="round"
-                        opacity={opacity}
-                      />
-                    ) : null}
-                    {slot.availability === 'pwd_locked' ? (
-                      <Circle
-                        cx={x + w / 2}
-                        cy={y + h / 2}
-                        r={Math.min(w, h) * 0.3}
-                        fill="none"
-                        stroke={colors.surface}
-                        strokeWidth={8}
-                        strokeDasharray="12 9"
-                        opacity={opacity}
-                      />
-                    ) : null}
-                    {slot.is_pwd ? (
-                      <Rect
-                        x={x + 3}
-                        y={y + 3}
-                        width={Math.max(w - 6, 4)}
-                        height={Math.max(h - 6, 4)}
-                        rx={3}
-                        fill="none"
-                        stroke={colors.surface}
-                        strokeWidth={5}
-                        opacity={opacity}
-                      />
-                    ) : null}
-                    {glyph && w >= 34 && h >= 34 ? (
-                      <SvgText
-                        x={x + w / 2}
-                        y={y + h / 2 + 12}
-                        fontSize={30}
-                        fontWeight="700"
-                        fill={colors.surface}
-                        textAnchor="middle"
-                        opacity={opacity}
-                      >
-                        {glyph}
-                      </SvgText>
-                    ) : null}
-
-                    {/* Live Occupancy Indicator (Green/Red dot) */}
-                    <Circle
-                      cx={x + w - 12}
-                      cy={y + 12}
-                      r={6}
-                      fill={slot.availability === 'available' ? colors.success : colors.danger}
-                      stroke={colors.surface}
-                      strokeWidth={2}
-                      opacity={opacity}
-                    />
-                  </React.Fragment>
+                    <Circle cx={cx} cy={cy} r={r} fill={color} stroke={colors.surface} strokeWidth={3} />
+                    <SvgText
+                      x={cx}
+                      y={cy + 6}
+                      fontSize={18}
+                      fontWeight="700"
+                      fill={colors.surface}
+                      textAnchor="middle"
+                    >
+                      {glyph}
+                    </SvgText>
+                  </G>
                 );
               })}
 
               {/* Entrance / start of the route. */}
               <Circle
-                cx={entrance.x}
-                cy={entrance.y}
+                cx={ENTRANCE.x}
+                cy={ENTRANCE.y}
                 r={34}
                 fill={colors.navy}
                 stroke={colors.surface}
                 strokeWidth={8}
               />
               <SvgText
-                x={entrance.x}
-                y={entrance.y + 12}
+                x={ENTRANCE.x}
+                y={ENTRANCE.y + 12}
                 fontSize={32}
                 fontWeight="700"
                 fill={colors.textOnDark}
@@ -587,11 +494,9 @@ export default function FloorPlan({
               />
             ) : null}
 
-            {routeSlot ? (
+            {routeEntry ? (
               <PulsingRing
-                slot={routeSlot}
-                canvasW={canvasW}
-                canvasH={canvasH}
+                box={routeEntry.box}
                 reduceMotion={reduceMotion}
                 colour="#FF9500" // Bright orange for assigned slot
                 pctX={pctX}
@@ -601,27 +506,27 @@ export default function FloorPlan({
 
             {routePoints ? (
               <View
-                style={[styles.youBadge, { left: pctX(entrance.x), top: pctY(entrance.y) }]}
+                style={[styles.youBadge, { left: pctX(ENTRANCE.x), top: pctY(ENTRANCE.y) }]}
                 pointerEvents="none"
               >
                 <Text style={[typeToken('small', textScale), { color: colors.textOnDark }]}>YOU</Text>
               </View>
             ) : null}
 
-            {selectedSlot ? (
+            {selectedEntry ? (
               <View style={[styles.callout, { borderColor: colors.border }]} pointerEvents="none">
                 <View
                   style={[
                     styles.calloutDot,
-                    { backgroundColor: availabilityColor(selectedSlot.availability, colors) },
+                    { backgroundColor: availabilityColor(selectedEntry.slot.availability, colors) },
                   ]}
                 />
                 <Text
                   style={[typeToken('caption', textScale), { color: colors.text }]}
                   numberOfLines={1}
                 >
-                  {selectedSlot.slot_code} · {availabilityLabel(selectedSlot.availability)}
-                  {selectedSlot.is_pwd ? ' · PWD' : ''}
+                  {selectedEntry.slot.slot_code} · {availabilityLabel(selectedEntry.slot.availability)}
+                  {selectedEntry.slot.is_pwd ? ' · PWD' : ''}
                 </Text>
               </View>
             ) : null}
@@ -756,17 +661,13 @@ function RouteMotion({
 
 /** Expanding ring around the destination bay. */
 function PulsingRing({
-  slot,
-  canvasW,
-  canvasH,
+  box,
   reduceMotion,
   colour,
   pctX,
   pctY,
 }: {
-  slot: FloorPlanSlot;
-  canvasW: number;
-  canvasH: number;
+  box: MapBox;
   reduceMotion: boolean;
   colour: string;
   pctX: (value: number) => `${number}%`;
@@ -805,10 +706,10 @@ function PulsingRing({
         styles.pulseRing,
         {
           borderColor: colour,
-          left: pctX(slot.floor_x ?? 0),
-          top: pctY(slot.floor_y ?? 0),
-          width: pctX(slot.floor_w ?? 0),
-          height: pctY(slot.floor_h ?? 0),
+          left: pctX(box.x),
+          top: pctY(box.y),
+          width: pctX(box.w),
+          height: pctY(box.h),
         },
         style,
       ]}
@@ -837,12 +738,6 @@ export function FloorPlanLegend({ textScale = 1 }: { textScale?: number }) {
           >
             <Text style={styles.legendGlyph}>{entry.glyph}</Text>
           </View>
-          <View
-            style={[
-              styles.occupancyDot,
-              { backgroundColor: entry.key === 'available' ? colors.success : colors.danger },
-            ]}
-          />
           <Text style={[typeToken('small', textScale), { color: colors.text }]}>{entry.label}</Text>
         </View>
       ))}
@@ -954,11 +849,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  occupancyDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
   },
   legendGlyph: {
     fontSize: 10,

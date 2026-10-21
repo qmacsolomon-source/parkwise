@@ -11,7 +11,6 @@ import { useTheme } from '../contexts/AccessibilityContext';
 import { useFloorPlan } from '../hooks/useFloorPlan';
 import AppScreen from '../components/AppScreen';
 import FloorPlanPicker from '../components/FloorPlanPicker';
-import RouteGuide from '../components/RouteGuide';
 import {
   BottomSheet,
   Button,
@@ -171,11 +170,6 @@ export default function ReservationScreen() {
     enabled: step === 'result' || changing,
     realtime: step === 'result' || changing,
   });
-
-  const assignedSlot = useMemo(
-    () => (result ? plan.slots.find((slot) => slot.slot_id === result.slot_id) ?? null : null),
-    [plan.slots, result]
-  );
 
   const windowError = validateWindow(startISO, endISO);
   const charge = estimateCharge(startISO, endISO, rate?.hourly_rate ?? null);
@@ -397,12 +391,6 @@ export default function ReservationScreen() {
                 routeSlotId={result.slot_id}
               />
             </View>
-
-            {assignedSlot ? (
-              <View style={styles.block}>
-                <RouteGuide layout={plan.layout} slot={assignedSlot} />
-              </View>
-            ) : null}
 
             <View style={styles.actions}>
               <Button
