@@ -509,7 +509,6 @@ export default function ReservationScreen() {
           <TimeRow
             label="Starts"
             date={start}
-            minDate={new Date()}
             onPickDate={() => setPicker({ field: 'start', mode: 'date' })}
             onPickTime={() => setPicker({ field: 'start', mode: 'time' })}
           />
@@ -517,7 +516,6 @@ export default function ReservationScreen() {
           <TimeRow
             label="Ends"
             date={end}
-            minDate={start}
             onPickDate={() => setPicker({ field: 'end', mode: 'date' })}
             onPickTime={() => setPicker({ field: 'end', mode: 'time' })}
           />
@@ -528,7 +526,7 @@ export default function ReservationScreen() {
         <DateTimePicker
           value={picker.field === 'start' ? start : end}
           mode={picker.mode}
-          minimumDate={picker.field === 'end' ? start : undefined}
+          minimumDate={picker.field === 'end' ? start : new Date()}
           onChange={onPickerChange}
         />
       ) : null}
@@ -664,7 +662,6 @@ export default function ReservationScreen() {
 interface TimeRowProps {
   label: string;
   date: Date;
-  minDate: Date;
   onPickDate: () => void;
   onPickTime: () => void;
 }
