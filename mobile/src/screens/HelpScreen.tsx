@@ -89,7 +89,7 @@ const SECTIONS: FaqSection[] = [
         id: '9',
         question: 'How do PWD slots work?',
         answer:
-          'PWD slots are reserved for verified PWD permit holders. After registration with your PWD permit number, your account will be verified by staff before you can book PWD slots.',
+          "PWD slots are reserved for verified PWD permit holders. If you checked \"I have a PWD permit\" when you registered, you'll be asked to submit your permit number and a photo in Settings - staff then verify it before PWD slots are offered to you first.",
       },
     ],
   },

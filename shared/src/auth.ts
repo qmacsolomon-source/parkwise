@@ -150,6 +150,23 @@ export const authService = {
     if (!supabase || !isConfigured) {
       throw new Error('Supabase is not configured. Please check your environment variables.');
     }
+
+    // The login field accepts an email OR an 11-digit phone number - Supabase
+    // itself only signs in by email, so a phone-shaped identifier is first
+    // resolved to the matching email via email_for_phone(). If nothing
+    // matches, the original (phone-shaped) value is left in place so
+    // signInWithPassword below fails with the same generic "invalid
+    // credentials" error as a wrong password - never revealing whether that
+    // phone number exists.
+    let email = credentials.email;
+    const looksLikePhone = !email.includes('@') && /^\d{11}$/.test(email.replace(/\D/g, ''));
+    if (looksLikePhone) {
+      const { data: resolvedEmail } = await supabase.rpc('email_for_phone', {
+        p_phone: email,
+      });
+      if (resolvedEmail) email = resolvedEmail as string;
+    }
+
     // Log login attempt
     await this.logAudit('login_attempt', {
       email: credentials.email,
@@ -157,7 +174,7 @@ export const authService = {
     });
 
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: credentials.email,
+      email,
       password: credentials.password,
     });
 

@@ -339,6 +339,52 @@ REVOKE ALL ON FUNCTION public.request_my_account_deletion() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.request_my_account_deletion() TO authenticated;
 
 -- ---------------------------------------------------------------------------
+-- 4b. email_for_phone(p_phone) - lets a customer log in with their phone
+--     number instead of their email (Supabase itself only signs in by
+--     email). Returns NULL rather than an email on no match or more than
+--     one match (phone was never unique before the partial index below) -
+--     never reveals whether a phone number exists.
+-- ---------------------------------------------------------------------------
+DO $$
+BEGIN
+  BEGIN
+    CREATE UNIQUE INDEX profiles_phone_unique_idx ON public.profiles (phone)
+      WHERE phone ~ '^[0-9]{11}$';
+  EXCEPTION
+    WHEN duplicate_table THEN NULL;
+    WHEN unique_violation THEN
+      RAISE NOTICE 'profiles_phone_unique_idx: skipped - two or more profiles already share the same 11-digit phone number.';
+  END;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.email_for_phone(p_phone TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_emails TEXT[];
+BEGIN
+  SELECT array_agg(email) INTO v_emails
+    FROM public.profiles
+   WHERE regexp_replace(phone, '[^0-9]', '', 'g') = regexp_replace(COALESCE(p_phone, ''), '[^0-9]', '', 'g')
+     AND phone ~ '^[0-9]{11}$'
+     AND status = 'active';
+
+  IF array_length(v_emails, 1) = 1 THEN
+    RETURN v_emails[1];
+  END IF;
+
+  RETURN NULL;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.email_for_phone(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.email_for_phone(TEXT) TO anon, authenticated;
+
+-- ---------------------------------------------------------------------------
 -- 5. rates: readable by signed-in customers + never empty
 -- ---------------------------------------------------------------------------
 DROP POLICY IF EXISTS "Authenticated can read rates" ON public.rates;

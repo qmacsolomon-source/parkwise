@@ -268,6 +268,31 @@ SELECT tgname FROM pg_trigger WHERE tgname = 'protect_profile_columns_trg';
 
 Expected: 1 row.
 
+### `12_phone_login.sql` — fixes "log in with phone number" (it never actually worked)
+
+Login's "Email or Phone" field accepted and validated an 11-digit phone
+number, but it was passed straight through as the literal email to Supabase,
+which can never match - phone login has silently never worked, always
+failing with the same generic "check your credentials" message as a wrong
+password. Adds `email_for_phone(phone)` (resolves a phone to its matching
+email, server-side) and a partial unique index on `profiles.phone` covering
+only well-formed 11-digit numbers (blank/legacy values are left alone, so
+this cannot fail on existing data - unless two real customers already share
+the same number, in which case it's skipped with a NOTICE instead of failing
+the whole file).
+
+**Expected result:** `Success. No rows returned`, possibly with a `NOTICE` if
+two existing profiles share a phone number - that's not a failure, see above.
+
+Quick check (paste on its own):
+
+```sql
+SELECT proname FROM pg_proc WHERE proname = 'email_for_phone';
+SELECT indexname FROM pg_indexes WHERE indexname = 'profiles_phone_unique_idx';
+```
+
+Expected: 1 row each (the index may be missing with the NOTICE above explaining why).
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -310,6 +335,8 @@ WITH r AS (
               WHERE proname = 'request_my_account_deletion'
   UNION ALL SELECT 'protect_profile_columns trigger (SECURITY)', COUNT(*)::text, (COUNT(*) = 1) FROM pg_trigger
               WHERE tgname = 'protect_profile_columns_trg'
+  UNION ALL SELECT 'email_for_phone()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
+              WHERE proname = 'email_for_phone'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -335,6 +362,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `profile name-parts columns` = **3**
 - `request_my_account_deletion()` = **1**
 - `protect_profile_columns trigger (SECURITY)` = **1**
+- `email_for_phone()` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 
