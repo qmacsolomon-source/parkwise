@@ -166,6 +166,152 @@ SELECT COUNT(*) FROM pg_publication_tables
 
 Expected: `1`.
 
+### `07_vehicles_is_active.sql` — fixes "column vehicle.is_active does not exist"
+
+Adds `vehicles.is_active` (every existing vehicle backfilled to `true`) and
+changes `reservations.vehicle_id`'s foreign key from `ON DELETE CASCADE` to
+`ON DELETE RESTRICT`, so a vehicle with booking history can never be
+hard-deleted by anything — the app already archives those instead.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_schema='public' AND table_name='vehicles' AND column_name='is_active';
+SELECT confdeltype FROM pg_constraint WHERE conname = 'reservations_vehicle_id_fkey';
+```
+
+Expected: one column row, and `confdeltype = 'r'` (RESTRICT, not `'c'` for CASCADE).
+
+### `08_realtime_publication.sql` — turns on live updates for slots, reservations, notifications
+
+The mobile app has been subscribing to realtime changes on `slots`,
+`reservations`, `notifications` and `agent_states` this whole time — but only
+`profiles` was ever added to the live project's realtime publication, so
+those subscriptions connect but silently receive nothing. This is why the new
+occupancy dots and live notifications don't update until you manually
+refresh/reopen a screen. This file turns them on for real.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT tablename FROM pg_publication_tables
+ WHERE pubname = 'supabase_realtime' ORDER BY tablename;
+```
+
+Expected: `agent_states`, `notifications`, `profiles`, `reservations`, `slots` (5 rows).
+
+### `09_profile_name_parts.sql` — splits sign-up name into First / Middle / Surname
+
+Registration now asks for First Name / Middle Name (optional) / Surname
+separately instead of one "Full Name" field. Adds `profiles.first_name`,
+`profiles.middle_name`, `profiles.last_name` (all nullable — null for every
+row that existed before this, and for staff accounts, which still have no
+name-parts concept). `full_name` itself is untouched and still gets computed
+automatically from the three parts, so every existing place that reads
+`profiles.full_name` (desktop reports, payment logs, notifications, account
+creation, user management) keeps working exactly as before.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT column_name FROM information_schema.columns
+ WHERE table_schema='public' AND table_name='profiles'
+   AND column_name IN ('first_name','middle_name','last_name');
+```
+
+Expected: 3 rows.
+
+### `10_request_account_deletion.sql` — fixes Settings' "Request account deletion"
+
+`request_my_account_deletion()` existed in the repo's fresh-install script but
+was never carried into the live upgrade path — tapping "Send request" in
+Settings currently fails on the live project. Adds the function (records an
+audit-log entry for staff to action; never deletes anything itself).
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT proname FROM pg_proc WHERE proname = 'request_my_account_deletion';
+```
+
+Expected: 1 row.
+
+### `11_protect_profile_columns.sql` — SECURITY FIX, run this one first if you only run one
+
+The live database's "Users can update own profile" RLS policy only checks
+*which row* a customer can update, not *which columns* — Postgres RLS can't
+restrict that on its own. Without this trigger, any signed-in customer can
+currently grant themselves `role = 'admin'`, re-enable their own disabled
+account, or mark their own PWD permit verified, just by calling
+`profiles.update(...)` on their own row from the app. This existed in the
+fresh-install script but was never carried into live. Adds
+`protect_profile_columns()` + its trigger, which pins `role`/`status`/
+`pwd_verified` back to their existing value for anyone who isn't already
+staff.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT tgname FROM pg_trigger WHERE tgname = 'protect_profile_columns_trg';
+```
+
+Expected: 1 row.
+
+### `12_phone_login.sql` — fixes "log in with phone number" (it never actually worked)
+
+Login's "Email or Phone" field accepted and validated an 11-digit phone
+number, but it was passed straight through as the literal email to Supabase,
+which can never match - phone login has silently never worked, always
+failing with the same generic "check your credentials" message as a wrong
+password. Adds `email_for_phone(phone)` (resolves a phone to its matching
+email, server-side) and a partial unique index on `profiles.phone` covering
+only well-formed 11-digit numbers (blank/legacy values are left alone, so
+this cannot fail on existing data - unless two real customers already share
+the same number, in which case it's skipped with a NOTICE instead of failing
+the whole file).
+
+**Expected result:** `Success. No rows returned`, possibly with a `NOTICE` if
+two existing profiles share a phone number - that's not a failure, see above.
+
+Quick check (paste on its own):
+
+```sql
+SELECT proname FROM pg_proc WHERE proname = 'email_for_phone';
+SELECT indexname FROM pg_indexes WHERE indexname = 'profiles_phone_unique_idx';
+```
+
+Expected: 1 row each (the index may be missing with the NOTICE above explaining why).
+
+### `13_frames_bucket.sql` — storage for the ALPR camera's frames
+
+Creates the public `frames` Storage bucket `agent-service` uploads camera
+frames to (public because `storage.py` builds its download URL by hand
+rather than requesting a signed one - see the file's own comment for the
+trade-off), plus the matching `storage.buckets` SELECT policy (same
+"Bucket not found" issue as `04`/`07`, for anyone other than the
+service-role key, which bypasses RLS and doesn't need it).
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT id, public FROM storage.buckets WHERE id = 'frames';
+```
+
+Expected: one row, `public = true`.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -196,6 +342,22 @@ WITH r AS (
               WHERE table_schema='public' AND table_name='profiles' AND column_name='pwd_intent'
   UNION ALL SELECT 'profiles realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
               WHERE pubname = 'supabase_realtime' AND tablename = 'profiles'
+  UNION ALL SELECT 'vehicles.is_active column', COUNT(*)::text, (COUNT(*) = 1) FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='vehicles' AND column_name='is_active'
+  UNION ALL SELECT 'vehicle FK is RESTRICT', confdeltype::text, (confdeltype = 'r') FROM pg_constraint
+              WHERE conname = 'reservations_vehicle_id_fkey'
+  UNION ALL SELECT 'realtime: slots/reservations/notifications/agent_states', COUNT(*)::text, (COUNT(*) = 4) FROM pg_publication_tables
+              WHERE pubname = 'supabase_realtime' AND tablename IN ('slots','reservations','notifications','agent_states')
+  UNION ALL SELECT 'profile name-parts columns', COUNT(*)::text, (COUNT(*) = 3) FROM information_schema.columns
+              WHERE table_schema='public' AND table_name='profiles' AND column_name IN ('first_name','middle_name','last_name')
+  UNION ALL SELECT 'request_my_account_deletion()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
+              WHERE proname = 'request_my_account_deletion'
+  UNION ALL SELECT 'protect_profile_columns trigger (SECURITY)', COUNT(*)::text, (COUNT(*) = 1) FROM pg_trigger
+              WHERE tgname = 'protect_profile_columns_trg'
+  UNION ALL SELECT 'email_for_phone()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
+              WHERE proname = 'email_for_phone'
+  UNION ALL SELECT 'frames bucket', COUNT(*)::text, (COUNT(*) = 1) FROM storage.buckets
+              WHERE id = 'frames'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -215,6 +377,14 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `pwd-permits bucket policy` = **1**
 - `pwd_intent column` = **1**
 - `profiles realtime` = **1**
+- `vehicles.is_active column` = **1**
+- `vehicle FK is RESTRICT` → `ok = true`
+- `realtime: slots/reservations/notifications/agent_states` = **4**
+- `profile name-parts columns` = **3**
+- `request_my_account_deletion()` = **1**
+- `protect_profile_columns trigger (SECURITY)` = **1**
+- `email_for_phone()` = **1**
+- `frames bucket` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

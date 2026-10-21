@@ -1,5 +1,5 @@
 -- ===========================================================================
--- 07_frames_bucket.sql
+-- 13_frames_bucket.sql
 -- Creates the Storage bucket that agent-service uploads camera frames to.
 --
 -- Safe to re-run: the insert is ON CONFLICT DO NOTHING and the policy is
