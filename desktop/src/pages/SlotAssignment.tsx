@@ -89,17 +89,28 @@ export default function SlotAssignment() {
     setLoading(true);
     try {
       const now = new Date();
-      const { data } = await supabase
+      // slots!reservations_slot_id_fkey, not slots!inner: slots also has
+      // current_reservation_id pointing back at reservations.id, so a bare
+      // "slots!inner" is ambiguous between the two FKs (PGRST201) and
+      // PostgREST rejects the whole query - which the old code never
+      // surfaced (it only ever read `data`, never `error`), so this silently
+      // rendered an empty list instead of failing loudly.
+      const { data, error: loadError } = await supabase
         .from('reservations')
         .select(`
           *,
-          slots!inner(slot_code, is_pwd, status),
+          slots!reservations_slot_id_fkey(slot_code, is_pwd, status),
           profiles!inner(full_name),
           vehicles!inner(plate_number)
         `)
         .in('status', ['pending', 'active'])
         .gte('start_time', new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
         .order('start_time');
+
+      if (loadError) {
+        console.error('Error loading reservations:', loadError);
+        setError(loadError.message || 'Failed to load reservations');
+      }
 
       const reservationsWithDetails: ReservationWithDetails[] = (data || []).map((r: any) => ({
         ...r,
