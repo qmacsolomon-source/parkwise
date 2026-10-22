@@ -164,8 +164,22 @@ export default function PlateVerification() {
 
       if (!response.ok) throw new Error('Failed to accept vehicle');
 
-      // Update local state
+      // Same gap as SlotAssignment.tsx's handleCheckIn had (Round 55):
+      // without this, the reservation sits at 'pending' forever and the
+      // slot never turns 'occupied' - this is the write update_slot_status()
+      // is actually watching for.
+      const { error: activateError } = await supabase
+        .from('reservations')
+        .update({ status: 'active' })
+        .eq('id', selectedReservation.id);
+
+      if (activateError) throw activateError;
+
+      // Close back to the slot picker instead of staying parked on this
+      // slot's panel - the attendant is done here once the vehicle's
+      // accepted, and camera watching continues in the background either way.
       setSelectedReservation(null);
+      setSelectedSlot(null);
       setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
       setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
