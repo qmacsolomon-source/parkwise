@@ -181,21 +181,40 @@ class SlotAgent:
         
         self.last_frame = frame_data
         self.last_frame_time = datetime.utcnow()
-        
-        # Save frame to storage
-        frame_url = await Storage.upload_frame(self.slot_id, frame_data, self.last_frame_time)
-        
+
         # Decode image for recognition
         import numpy as np
         import cv2
-        
+
         nparr = np.frombuffer(frame_data, np.uint8)
         image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         if image is None:
             logger.error("Failed to decode frame", slot_id=self.slot_id)
             return
-        
+
+        # The firmware's own sensor_t.set_vflip()/set_hmirror() calls
+        # (esp32_cam.ino's initCamera()) are the "correct" place to fix this,
+        # but don't reliably take effect on this board's sensor - confirmed
+        # by re-flashing the verified-correct firmware and still getting a
+        # wrong-orientation frame. Doing it here instead doesn't depend on
+        # sensor-driver quirks, so it's what's actually relied on.
+        #
+        # This is a vertical flip ONLY, not a full 180 rotation - empirically
+        # confirmed against real captured frames (both a frame from before
+        # any orientation fix, and one from after re-flashing the firmware's
+        # own vflip+hmirror fix): a plain top/bottom flip alone produces a
+        # correctly-readable plate, while rotating both axes over-corrects.
+        # Re-encoding so the stored/displayed frame matches what recognition
+        # sees, instead of showing attendants a wrong-orientation photo while
+        # detection silently works on a corrected copy.
+        image = cv2.flip(image, 0)
+        encode_ok, encoded = cv2.imencode('.jpg', image)
+        upload_bytes = encoded.tobytes() if encode_ok else frame_data
+
+        # Save frame to storage
+        frame_url = await Storage.upload_frame(self.slot_id, upload_bytes, self.last_frame_time)
+
         # Recognize plate
         recognizer = get_plate_recognizer()
         detected_plate, confidence = recognizer.recognize(image)
