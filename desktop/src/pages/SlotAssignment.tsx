@@ -360,24 +360,19 @@ export default function SlotAssignment() {
     }
   };
 
-  // Arms the camera-matching agent for this reservation's slot - the same
-  // call Plate Verification's "Accept Vehicle" makes, just reachable from
-  // the list the attendant is already looking at instead of making them
-  // re-pick the same slot and reservation from a pair of dropdowns on a
-  // different page.
+  // Administrative check-in only - this is step one of a deliberate two-step
+  // flow, not the same thing as Plate Verification's "Accept Vehicle".
+  // Slot Assignment's job is "the car is physically here, occupy the bay";
+  // starting the camera-matching agent and actually verifying the plate is
+  // Plate Verification's job, done separately once the attendant gets
+  // there. This used to also call agent-service's /accept (arming the
+  // camera from here too), which collapsed the two stages into one and
+  // made both screens' "Accept Vehicle" do the identical thing.
   const handleCheckIn = async (reservation: ReservationWithDetails) => {
     setCheckingInId(reservation.id);
     setError('');
 
     try {
-      const response = await fetch(`${AGENT_SERVICE_URL}/agents/${reservation.slot_id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected_plate: reservation.vehicle_plate }),
-      });
-
-      if (!response.ok) throw new Error('Failed to check in vehicle');
-
       // reservations.status has a real 'active' value in its enum - it just
       // never gets set anywhere, so every reservation sat at 'pending' from
       // booking all the way to verification, no matter what had actually
@@ -397,7 +392,7 @@ export default function SlotAssignment() {
       setTimeout(() => setSuccess(false), 3000);
     } catch (err: any) {
       console.error('Error checking in vehicle:', err);
-      setError(err.message || 'Failed to check in vehicle. Is agent-service running?');
+      setError(err.message || 'Failed to check in vehicle.');
     } finally {
       setCheckingInId(null);
     }
@@ -578,14 +573,21 @@ export default function SlotAssignment() {
                   </div>
                   <button
                     onClick={() => handleCheckIn(reservation)}
-                    disabled={checkingInId === reservation.id || camera?.lockButton}
+                    disabled={checkingInId === reservation.id || reservation.status !== 'pending'}
                     className="mt-3 w-full px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle size={14} />
                     {checkingInId === reservation.id
                       ? 'Checking in...'
-                      : camera?.buttonLabel ?? 'Accept Vehicle (start camera watch)'}
+                      : reservation.status !== 'pending'
+                        ? 'Already accepted'
+                        : 'Accept Vehicle'}
                   </button>
+                  {reservation.status === 'active' && !camera && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Go to Plate Verification to start the camera check.
+                    </p>
+                  )}
                   <button
                     onClick={() => {
                       setSelectedReservation(reservation);
