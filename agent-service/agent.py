@@ -293,14 +293,21 @@ class SlotAgent:
     
     async def _verify_success(self):
         """Handle successful verification."""
-        logger.info("Verification successful", slot_id=self.slot_id, 
+        logger.info("Verification successful", slot_id=self.slot_id,
                    detected=self.detected_plate, expected=self.expected_plate)
-        
-        # Check PWD slot requirements
+
+        # Check PWD slot requirements - a violation here must stop the rest
+        # of this function from running. _check_pwd_permit() itself raises
+        # an alert (state=ALERT, slot='unverified') on a violation, but
+        # previously nothing checked that before continuing on to set
+        # state=VERIFIED and slot='occupied' a few lines below, silently
+        # overwriting the alert it had just raised - so a PWD violation was
+        # detected, logged, and then immediately undone every time.
         slot = await Database.get_slot(self.slot_id)
         if slot and slot['is_pwd']:
-            await self._check_pwd_permit()
-        
+            if not await self._check_pwd_permit():
+                return
+
         # Update state
         self.state = AgentState.VERIFIED
         self.verified_at = datetime.utcnow()
@@ -331,28 +338,38 @@ class SlotAgent:
         # Start overstay monitoring
         self._start_overstay_monitoring()
     
-    async def _check_pwd_permit(self):
-        """Check if vehicle owner has PWD permit for PWD slot."""
+    async def _check_pwd_permit(self) -> bool:
+        """
+        Check if vehicle owner has PWD permit for PWD slot.
+        Returns False (having already raised an alert) if this is a real
+        violation that should block verification; True otherwise - including
+        the "can't actually check" cases (no plate, no matching vehicle/profile
+        row), which were already silent no-ops before this returned anything
+        and stay that way rather than blocking verification on missing data.
+        """
         if not self.detected_plate:
-            return
-        
+            return True
+
         # Get vehicle
         vehicle = await Database.get_vehicle(self.detected_plate)
         if not vehicle:
             logger.warning("Vehicle not found for PWD check", plate=self.detected_plate)
-            return
-        
+            return True
+
         # Get owner profile
         profile = await Database.get_profile(vehicle['owner_id'])
         if not profile:
             logger.warning("Profile not found for PWD check", owner_id=vehicle['owner_id'])
-            return
-        
+            return True
+
         # Check PWD verification
         if not profile.get('pwd_verified', False):
-            logger.warning("PWD slot violation - vehicle not PWD verified", 
+            logger.warning("PWD slot violation - vehicle not PWD verified",
                          slot_id=self.slot_id, plate=self.detected_plate)
             await self._raise_alert("pwd_violation")
+            return False
+
+        return True
     
     async def _raise_alert(self, reason: str):
         """Raise alert for verification failure."""
