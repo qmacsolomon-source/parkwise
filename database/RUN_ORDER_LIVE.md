@@ -356,6 +356,22 @@ SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'no_overlapp
 Expected: the definition ends with a `WHERE` clause excluding `cancelled`,
 `completed`, and `no_show`.
 
+### `16_occupied_means_verified.sql` — a slot only shows 'occupied' once the camera actually verified it
+
+`update_slot_status()` previously treated `reservations.status = 'active'`
+(an attendant administratively checking a car in on Slot Assignment) the
+same as `'verified'` (the camera actually confirmed the plate on Plate
+Verification) - both turned the slot `occupied` immediately. Now only
+`'verified'` does; `'active'` leaves the slot at `'reserved'`, matching what
+a freshly-created reservation already gets. Redefines the trigger function
+in place (`CREATE OR REPLACE`, no DROP needed, unlike `15`'s constraint).
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (manual, not a query): accept a vehicle on Slot Assignment and
+confirm the slot shows `reserved`, not `occupied`, until Plate Verification's
+Accept Vehicle actually verifies the plate.
+
 ---
 
 ## 3. Final check — "is everything installed?"

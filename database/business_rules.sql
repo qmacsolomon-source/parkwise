@@ -62,7 +62,12 @@ BEGIN
   ELSIF TG_OP = 'UPDATE' THEN
     -- Update slot status based on reservation status
     IF NEW.status = 'active' THEN
-      UPDATE slots SET status = 'occupied', current_reservation_id = NEW.id
+      -- Administratively checked in (Slot Assignment's Accept Vehicle), not
+      -- yet camera-verified. Keep the slot 'reserved', not 'occupied' -
+      -- 'occupied' is reserved to mean "the camera confirmed the plate,"
+      -- which only happens once status reaches 'verified' below, not just
+      -- because an attendant clicked accept.
+      UPDATE slots SET status = 'reserved', current_reservation_id = NEW.id
       WHERE id = NEW.slot_id;
     ELSIF NEW.status = 'verified' THEN
       UPDATE slots SET status = 'occupied', current_reservation_id = NEW.id

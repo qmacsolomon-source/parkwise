@@ -302,14 +302,13 @@ export default function ManualEntry() {
 
       if (reservationError) throw reservationError;
 
-      // Update slot status
-      await supabase
-        .from('slots')
-        .update({
-          status: 'occupied',
-          current_reservation_id: reservation.id,
-        })
-        .eq('id', selectedSlot);
+      // The reservations INSERT trigger (update_slot_status()) already set
+      // the slot to 'reserved' with this reservation's id - deliberately NOT
+      // overridden to 'occupied' here. 'occupied' now means specifically
+      // "the camera verified the plate" (see 16_occupied_means_verified.sql),
+      // which the agent-service accept call below starts working toward,
+      // not something a walk-in entry gets to skip straight to just because
+      // an attendant typed the plate in by hand.
 
       // Inform agent service (best-effort: the reservation itself already
       // succeeded above, so a missing/offline agent-service shouldn't make

@@ -293,10 +293,17 @@ export default function SlotAssignment() {
           .eq('id', oldSlot.id);
       }
 
-      // Update new slot status
+      // Update new slot status - 'occupied' means specifically "the camera
+      // verified the plate" (16_occupied_means_verified.sql), so only carry
+      // that over if this reservation was actually already verified;
+      // anything less (active/pending) lands on the new slot as 'reserved',
+      // same as update_slot_status() would give it.
       await supabase
         .from('slots')
-        .update({ status: 'occupied', current_reservation_id: selectedReservation.id })
+        .update({
+          status: selectedReservation.status === 'verified' ? 'occupied' : 'reserved',
+          current_reservation_id: selectedReservation.id,
+        })
         .eq('id', newSlotId);
 
       // Log to audit_log
