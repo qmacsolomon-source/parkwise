@@ -215,11 +215,17 @@ export default function SlotAssignment() {
   };
 
   const checkTimeOverlap = async (slotId: string, startTime: string, endTime: string, excludeReservationId?: string): Promise<boolean> => {
+    // Same statuses as the live DB's own no_overlapping_reservations
+    // constraint excludes from blocking (everything except
+    // cancelled/completed/no_show) - missing 'verified'/'overstay' here
+    // meant reassigning onto a slot with an already camera-verified, truly
+    // occupied reservation sailed past this friendly check and only got
+    // caught by the raw constraint violation at the database level instead.
     const { data } = await supabase
       .from('reservations')
       .select('id')
       .eq('slot_id', slotId)
-      .in('status', ['pending', 'active'])
+      .in('status', ['pending', 'active', 'verified', 'overstay'])
       .neq('id', excludeReservationId || '')
       .or(`and(start_time.lte.${endTime},end_time.gte.${startTime})`);
 

@@ -48,7 +48,12 @@ const LOCAL_LAYOUT: FloorPlanLayout = {
   aisle: DEFAULT_AISLE,
 };
 
-const OPEN_RESERVATION_STATUSES = ['pending', 'active'];
+// Every status that means "this slot is genuinely taken by this
+// reservation" - not just 'pending'/'active'. Missing 'verified' and
+// 'overstay' here meant this local-fallback path (used only when
+// get_floor_plan() isn't reachable) would show a slot as available even
+// while someone was actually camera-verified and parked in it.
+const OPEN_RESERVATION_STATUSES = ['pending', 'active', 'verified', 'overstay'];
 
 /**
  * The shared client is typed as nullable because the desktop build allows an
