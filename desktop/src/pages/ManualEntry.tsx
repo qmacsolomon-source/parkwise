@@ -406,13 +406,20 @@ export default function ManualEntry() {
         })
         .eq('id', entry.id);
 
-      // If reservation exists, cancel it
+      // If reservation exists, cancel it. Matches isVoidableStatus() above
+      // (active/verified/overstay), not just 'active' - a reservation that
+      // had already been camera-verified (or gone overstay) before the
+      // attendant clicked Void - which the button is explicitly allowed to
+      // do for those statuses - matched zero rows here, so it never
+      // actually got cancelled: stuck at 'verified'/'overstay' forever,
+      // even though the slot below gets freed and the camera released
+      // unconditionally regardless.
       if (entry.slotId) {
         await supabase
           .from('reservations')
           .update({ status: 'cancelled' })
           .eq('slot_id', entry.slotId)
-          .eq('status', 'active');
+          .in('status', ['active', 'verified', 'overstay']);
 
         // Free the slot
         await supabase
