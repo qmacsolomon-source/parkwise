@@ -39,6 +39,7 @@ class SlotAgent:
         self.reservation_id: Optional[str] = None
         self.verified_at: Optional[datetime] = None
         self.overstay_timer: Optional[asyncio.Task] = None
+        self.grace_timer: Optional[asyncio.Task] = None
         
         logger.info("SlotAgent initialized", slot_id=slot_id)
     
@@ -125,8 +126,18 @@ class SlotAgent:
             'confidence': None
         })
         
-        # Start grace period timer
-        asyncio.create_task(self._grace_period_timer())
+        # Start grace period timer. Cancel any previous one first - every
+        # accept_vehicle() call (including a re-accept/retry) used to spawn a
+        # brand new timer without ever cancelling the last one, so repeated
+        # accept/release cycles on the same slot left old timers sleeping in
+        # the background. Each one only checks "is the agent WAITING right
+        # now" with no way to tell it apart from a later, unrelated cycle -
+        # so a stale timer from minutes earlier could (and did) fire a
+        # grace_period_expired alert on a completely fresh accept, seconds
+        # after it was armed.
+        if self.grace_timer:
+            self.grace_timer.cancel()
+        self.grace_timer = asyncio.create_task(self._grace_period_timer())
     
     async def release_vehicle(self):
         """
@@ -134,11 +145,16 @@ class SlotAgent:
         Resets to IDLE state.
         """
         logger.info("Vehicle released", slot_id=self.slot_id)
-        
+
         # Cancel overstay timer if running
         if self.overstay_timer:
             self.overstay_timer.cancel()
             self.overstay_timer = None
+
+        # Cancel grace period timer if running
+        if self.grace_timer:
+            self.grace_timer.cancel()
+            self.grace_timer = None
         
         # Reset state
         self.state = AgentState.IDLE
