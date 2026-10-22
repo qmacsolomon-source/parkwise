@@ -6,7 +6,7 @@ import { supabase } from '@parkwise/shared';
 import { Slot, AgentState, Reservation, VerificationEvent, Profile, Vehicle, groupSlotsByFloor } from '@parkwise/shared';
 import {
   Camera, CheckCircle, XCircle, AlertTriangle, RefreshCw,
-  Clock, Search, Flag, Edit3, LogOut, Volume2, VolumeX
+  Clock, Search, Flag, Edit3, LogOut, Volume2, VolumeX, X
 } from 'lucide-react';
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
@@ -194,7 +194,12 @@ export default function PlateVerification() {
       // camera feed and results update (the realtime subscriptions above
       // already keep them current). Accept Vehicle, below, is the separate
       // action that closes back to the slot picker.
-      setSelectedReservation(null);
+      //
+      // Deliberately NOT clearing selectedReservation here (it used to be,
+      // when this handler also closed the panel) - with the panel staying
+      // open, clearing it would re-disable this same button and bring back
+      // "Select a reservation above first", making it look like nothing
+      // happened even though verification is now genuinely running.
       setSuccessMessage(`Verification started for slot ${selectedSlot.slot_code}.`);
       setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
@@ -209,9 +214,13 @@ export default function PlateVerification() {
   // The separate "exit" action - closes back to the slot picker once the
   // attendant is satisfied (watched it verify, or just decided to move on),
   // distinct from Start Verification above which deliberately stays open.
+  // No backend write here, no verification claim in the message either -
+  // this button is always available regardless of whether anything was
+  // actually started on this slot, so "Vehicle accepted" would be a false
+  // claim if clicked before Start Verification ever ran.
   const handleAcceptVehicle = () => {
     if (!selectedSlot) return;
-    setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
+    setSuccessMessage(`Closed slot ${selectedSlot.slot_code}.`);
     setTimeout(() => setSuccessMessage(''), 4000);
     setSelectedReservation(null);
     setSelectedSlot(null);
@@ -578,14 +587,6 @@ export default function PlateVerification() {
                     </p>
                   )}
 
-                  <button
-                    onClick={handleAcceptVehicle}
-                    className="btn-secondary w-full flex items-center justify-center gap-2"
-                  >
-                    <LogOut size={18} />
-                    Accept Vehicle
-                  </button>
-
                   {['waiting', 'verifying', 'alert'].includes(agentStates[selectedSlot.id]?.state || '') && (
                     <button
                       onClick={handleConfirmMatch}
@@ -630,6 +631,14 @@ export default function PlateVerification() {
                       Flag Unverified
                     </button>
                   </div>
+
+                  <button
+                    onClick={handleAcceptVehicle}
+                    className="btn-secondary w-full flex items-center justify-center gap-2"
+                  >
+                    <X size={18} />
+                    Accept Vehicle
+                  </button>
                 </div>
               </div>
             </div>
