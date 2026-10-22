@@ -149,7 +149,11 @@ export default function PlateVerification() {
     }
   };
 
-  const handleAcceptVehicle = async () => {
+  // Named distinctly from Slot Assignment's "Accept Vehicle" (different
+  // screen, different purpose) - this is the step that actually arms the
+  // camera agent and starts the live verification cycle, not a second,
+  // identically-named administrative accept.
+  const handleStartVerification = async () => {
     if (!selectedSlot || !selectedReservation) return;
 
     setActionLoading(true);
@@ -173,7 +177,9 @@ export default function PlateVerification() {
 
       if (activateError) throw activateError;
 
-      // Call agent service to accept vehicle
+      // Arm the camera-matching agent - this is what actually starts
+      // verification, unlike Slot Assignment's accept, which never touches
+      // the camera at all.
       const vehicle = vehicles[selectedReservation.vehicle_id];
       const response = await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot.id}/accept`, {
         method: 'POST',
@@ -181,22 +187,34 @@ export default function PlateVerification() {
         body: JSON.stringify({ expected_plate: vehicle.plate_number }),
       });
 
-      if (!response.ok) throw new Error('Failed to accept vehicle');
+      if (!response.ok) throw new Error('Failed to start verification');
 
-      // Close back to the slot picker instead of staying parked on this
-      // slot's panel - the attendant is done here once the vehicle's
-      // accepted, and camera watching continues in the background either way.
+      // Stay on this slot's panel, deliberately - starting verification is
+      // the point where the attendant actually wants to watch the live
+      // camera feed and results update (the realtime subscriptions above
+      // already keep them current). Accept Vehicle, below, is the separate
+      // action that closes back to the slot picker.
       setSelectedReservation(null);
-      setSelectedSlot(null);
-      setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
+      setSuccessMessage(`Verification started for slot ${selectedSlot.slot_code}.`);
       setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
     } catch (error) {
-      console.error('Error accepting vehicle:', error);
-      await dialog.alert('Failed to accept vehicle');
+      console.error('Error starting verification:', error);
+      await dialog.alert('Failed to start verification');
     } finally {
       setActionLoading(false);
     }
+  };
+
+  // The separate "exit" action - closes back to the slot picker once the
+  // attendant is satisfied (watched it verify, or just decided to move on),
+  // distinct from Start Verification above which deliberately stays open.
+  const handleAcceptVehicle = () => {
+    if (!selectedSlot) return;
+    setSuccessMessage(`Vehicle accepted for slot ${selectedSlot.slot_code}.`);
+    setTimeout(() => setSuccessMessage(''), 4000);
+    setSelectedReservation(null);
+    setSelectedSlot(null);
   };
 
   const handleConfirmMatch = async () => {
@@ -521,7 +539,7 @@ export default function PlateVerification() {
                 <div className="space-y-3 mt-6">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Select Reservation (for Accept Vehicle)
+                      Select Reservation (for Start Verification)
                     </label>
                     <select
                       value={selectedReservation?.id || ''}
@@ -547,18 +565,26 @@ export default function PlateVerification() {
                   </div>
 
                   <button
-                    onClick={handleAcceptVehicle}
+                    onClick={handleStartVerification}
                     disabled={!selectedReservation || actionLoading}
                     className="btn-primary w-full flex items-center justify-center gap-2"
                   >
                     <CheckCircle size={18} />
-                    Accept Vehicle
+                    Start Verification
                   </button>
                   {!selectedReservation && (
                     <p className="text-xs text-amber-600 -mt-2">
                       Select a reservation above first.
                     </p>
                   )}
+
+                  <button
+                    onClick={handleAcceptVehicle}
+                    className="btn-secondary w-full flex items-center justify-center gap-2"
+                  >
+                    <LogOut size={18} />
+                    Accept Vehicle
+                  </button>
 
                   {['waiting', 'verifying', 'alert'].includes(agentStates[selectedSlot.id]?.state || '') && (
                     <button

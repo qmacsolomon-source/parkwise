@@ -931,3 +931,14 @@ Every SQL function that decides "is this slot taken" (`get_floor_plan()`, `assig
 - **`desktop/src/pages/SlotAssignment.tsx`**'s `checkTimeOverlap()` - the friendly pre-check before attempting a reassign. Same gap: reassigning onto a slot with an already-verified occupant would sail past this check and only get caught by the raw database constraint violation instead of the intended "Selected slot has overlapping reservation" message.
 
 Both now match the full `pending`/`active`/`verified`/`overstay` set the SQL layer was always using correctly.
+
+## Round 70: Plate Verification's button was still called "Accept Vehicle" - same name as Slot Assignment's, even after the two were behaviorally split apart
+
+Pushed back correctly: Round 63 split the two screens' Accept Vehicle apart *behaviorally* (Slot Assignment = administrative only, Plate Verification = starts the camera), but left them with the *identical label*. A button named "Accept Vehicle" on both screens reads as the same action no matter what it actually does underneath - the naming itself was still saying "these are the same thing," directly contradicting the explicitly-stated intent that they're two different steps with two different purposes.
+
+- **`desktop/src/pages/PlateVerification.tsx`**: renamed `handleAcceptVehicle` to `handleStartVerification`, the button label to "Start Verification," the reservation-picker's helper label, the success message ("Verification started for slot X" instead of "Vehicle accepted for slot X"), and the error message/log line - end to end, nothing on this screen says "accept" anymore. Slot Assignment's own Accept Vehicle (the administrative one) is untouched.
+
+Immediate follow-up, same round: Start Verification closing the panel right after arming the camera meant there was no way to actually watch the live feed/results it had just started - defeating the point of staying on this screen at all. Split it into two real actions:
+
+- **Start Verification**: arms the camera (unchanged), but now stays open on the slot's panel instead of closing it - the realtime subscriptions already keep the live photo and detected/expected plate fields current, so staying open actually shows something happening.
+- **Accept Vehicle** (new, separate button): purely the exit action - closes back to the slot picker whenever the attendant is satisfied, whether that's right after watching it verify or just deciding to move on. No new backend write of its own; the actual verify/match decision is still made by auto-verify or the existing Confirm Match button, same as before.
