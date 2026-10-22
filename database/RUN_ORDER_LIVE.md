@@ -332,6 +332,30 @@ SELECT policyname FROM pg_policies WHERE tablename = 'agent_states';
 Expected: 3 rows (`Attendants can view agent states`, `Attendants can update
 agent states`, `Customers can view their own slot's agent state`).
 
+### `15_fix_overlap_constraint_terminal_statuses.sql` — stops a slot being permanently blocked by an old cancelled/completed reservation
+
+The `no_overlapping_reservations` EXCLUDE constraint on this live database has
+no `WHERE` clause, so once *any* reservation has ever existed for a slot and
+time range, that combination is blocked forever - even after the reservation
+is cancelled, completed, or marked no-show. `schema.sql` (the fresh-install
+reference) already has the correct version, scoped to only
+pending/active reservations; this live database was set up before that was
+added and never got it. Confirmed live: reassigning onto a slot with an
+earlier *completed* booking failed outright with a constraint violation.
+Postgres can't alter an EXCLUDE constraint's predicate in place, so this
+drops and recreates it.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'no_overlapping_reservations';
+```
+
+Expected: the definition ends with a `WHERE` clause excluding `cancelled`,
+`completed`, and `no_show`.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -380,6 +404,8 @@ WITH r AS (
               WHERE id = 'frames'
   UNION ALL SELECT 'agent_states customer read policy', COUNT(*)::text, (COUNT(*) = 1) FROM pg_policy
               WHERE polrelid = 'public.agent_states'::regclass AND polname = 'Customers can view their own slot''s agent state'
+  UNION ALL SELECT 'overlap constraint excludes terminal statuses', 'has WHERE', (pg_get_constraintdef(oid) LIKE '%WHERE%') FROM pg_constraint
+              WHERE conname = 'no_overlapping_reservations'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -408,6 +434,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `email_for_phone()` = **1**
 - `frames bucket` = **1**
 - `agent_states customer read policy` = **1**
+- `overlap constraint excludes terminal statuses` → `ok = true`
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

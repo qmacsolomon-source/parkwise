@@ -264,14 +264,29 @@ export default function SlotAssignment() {
       // Get old slot for logging
       const oldSlot = slots.find(s => s.id === selectedReservation.slot_id);
 
-      // Update reservation
-      await supabase
+      // Update reservation - this write is what the customer's own app
+      // actually reads (DashboardScreen.tsx's activeReservation.slot_id), so
+      // an unsurfaced failure here means the slots table and the
+      // reservation disagree about where the booking is, with no visible
+      // error - exactly what happened when the live no_overlapping_reservations
+      // constraint (missing its WHERE clause - see
+      // 15_fix_overlap_constraint_terminal_statuses.sql) rejected this exact
+      // write while every app-level check had already said it was fine.
+      const { error: moveError } = await supabase
         .from('reservations')
         .update({ slot_id: newSlotId })
         .eq('id', selectedReservation.id);
 
-      // Update old slot status if it was occupied
-      if (oldSlot?.status === 'occupied') {
+      if (moveError) throw moveError;
+
+      // Free the old slot whenever it was actually still tracking this
+      // reservation - not only when its status was exactly 'occupied'. A
+      // reservation that's only 'pending' (never accepted) leaves its slot
+      // at 'reserved', not 'occupied', and the old `=== 'occupied'` check
+      // skipped freeing it, leaving the old slot dangling - a stale
+      // current_reservation_id - after every reassignment of a not-yet-
+      // accepted booking.
+      if (oldSlot && oldSlot.current_reservation_id === selectedReservation.id) {
         await supabase
           .from('slots')
           .update({ status: 'available', current_reservation_id: null })
@@ -308,16 +323,22 @@ export default function SlotAssignment() {
         type: 'system',
       });
 
-      // Update agent's expected slot if reservation is active
+      // Move the camera agent to the new slot if this reservation had
+      // already been accepted - the old /beam call here hit a URL that
+      // doesn't exist (no slot id in the path, and a body /beam/{slot_id}
+      // never reads), so this silently never actually re-armed anything;
+      // the old slot's agent just kept watching for a car that was no
+      // longer expected there. Release the old slot's agent, then arm the
+      // new one with the exact same accept call Accept Vehicle uses.
       if (selectedReservation.status === 'active') {
         try {
-          await fetch(`${AGENT_SERVICE_URL}/beam`, {
+          if (oldSlot) {
+            await fetch(`${AGENT_SERVICE_URL}/agents/${oldSlot.id}/release`, { method: 'POST' });
+          }
+          await fetch(`${AGENT_SERVICE_URL}/agents/${newSlotId}/accept`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              slot_id: newSlotId,
-              expected_plate: selectedReservation.vehicle_plate,
-            }),
+            body: JSON.stringify({ expected_plate: selectedReservation.vehicle_plate }),
           });
         } catch (err) {
           console.error('Failed to update agent:', err);
