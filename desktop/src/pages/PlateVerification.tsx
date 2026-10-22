@@ -154,6 +154,25 @@ export default function PlateVerification() {
 
     setActionLoading(true);
     try {
+      // This write must happen BEFORE the agent-service call below, not
+      // after. agent.py's accept_vehicle() looks up this slot's reservation
+      // by querying for status='active' (Database.get_active_reservation())
+      // to set its own self.reservation_id - if that lookup runs while this
+      // reservation is still 'pending' (true whenever Plate Verification
+      // accepts one directly, without Slot Assignment having already set it
+      // active first - the dropdown above explicitly allows picking a
+      // pending reservation), it finds nothing and reservation_id stays
+      // null for the whole verification cycle. Everything gated on having
+      // one then silently never happens - including, on a successful
+      // camera match, actually marking the reservation 'verified' at all,
+      // so the slot could never reach 'occupied' for that booking.
+      const { error: activateError } = await supabase
+        .from('reservations')
+        .update({ status: 'active' })
+        .eq('id', selectedReservation.id);
+
+      if (activateError) throw activateError;
+
       // Call agent service to accept vehicle
       const vehicle = vehicles[selectedReservation.vehicle_id];
       const response = await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot.id}/accept`, {
@@ -163,17 +182,6 @@ export default function PlateVerification() {
       });
 
       if (!response.ok) throw new Error('Failed to accept vehicle');
-
-      // Same gap as SlotAssignment.tsx's handleCheckIn had (Round 55):
-      // without this, the reservation sits at 'pending' forever and the
-      // slot never turns 'occupied' - this is the write update_slot_status()
-      // is actually watching for.
-      const { error: activateError } = await supabase
-        .from('reservations')
-        .update({ status: 'active' })
-        .eq('id', selectedReservation.id);
-
-      if (activateError) throw activateError;
 
       // Close back to the slot picker instead of staying parked on this
       // slot's panel - the attendant is done here once the vehicle's

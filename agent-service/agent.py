@@ -98,24 +98,32 @@ class SlotAgent:
                            slot_id=self.slot_id, reservation_id=reservation['id'])
             return False
 
-        self.reservation_id = reservation['id']
-        await self.accept_vehicle(vehicle['plate_number'])
+        await self.accept_vehicle(vehicle['plate_number'], reservation_id=reservation['id'])
         logger.info("Agent auto-armed from reservation", slot_id=self.slot_id,
                     expected_plate=vehicle['plate_number'])
         return True
-    
-    async def accept_vehicle(self, expected_plate: str):
+
+    async def accept_vehicle(self, expected_plate: str, reservation_id: Optional[str] = None):
         """
         Attendant accepts a vehicle into the slot.
         Sets expected plate and transitions to WAITING state.
         """
         logger.info("Vehicle accepted", slot_id=self.slot_id, expected_plate=expected_plate)
-        
+
         self.expected_plate = expected_plate
         self.accepted_at = datetime.utcnow()
         self.state = AgentState.WAITING
         self.retry_count = 0
-        self.reservation_id = await self._get_active_reservation_id()
+        # Use the caller's own reservation_id when it already found one - the
+        # ESP32 auto-arm path (arm_from_reservation()) looks up ANY live
+        # reservation (pending/active/verified/overstay), not just 'active'
+        # ones, specifically so a car can be auto-armed before an attendant
+        # has ever clicked Accept. Re-deriving it here via the 'active'-only
+        # lookup instead would silently discard that - the attendant-click
+        # paths (Plate Verification, Manual Entry) always set the
+        # reservation to 'active' before calling this, so the fallback
+        # lookup still works correctly for them.
+        self.reservation_id = reservation_id if reservation_id is not None else await self._get_active_reservation_id()
         
         # Update database
         await Database.update_agent_state(self.slot_id, {
