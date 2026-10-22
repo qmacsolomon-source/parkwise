@@ -293,15 +293,18 @@ export default function SlotAssignment() {
           .eq('id', oldSlot.id);
       }
 
-      // Update new slot status - 'occupied' means specifically "the camera
-      // verified the plate" (16_occupied_means_verified.sql), so only carry
-      // that over if this reservation was actually already verified;
-      // anything less (active/pending) lands on the new slot as 'reserved',
-      // same as update_slot_status() would give it.
+      // Update new slot status. Always 'reserved', never 'occupied' - even
+      // if this reservation was already verified at its old slot, the fix
+      // above re-arms the camera agent fresh for the *new* slot, so
+      // nothing has actually verified the plate there yet. 'occupied'
+      // means specifically "the camera verified the plate at this slot"
+      // (16_occupied_means_verified.sql); carrying over an old slot's
+      // verification to a new one it never saw would contradict the
+      // re-verification that same camera-move just started.
       await supabase
         .from('slots')
         .update({
-          status: selectedReservation.status === 'verified' ? 'occupied' : 'reserved',
+          status: 'reserved',
           current_reservation_id: selectedReservation.id,
         })
         .eq('id', newSlotId);
@@ -337,7 +340,14 @@ export default function SlotAssignment() {
       // the old slot's agent just kept watching for a car that was no
       // longer expected there. Release the old slot's agent, then arm the
       // new one with the exact same accept call Accept Vehicle uses.
-      if (selectedReservation.status === 'active') {
+      //
+      // Covers 'verified' too, not just 'active' - this condition predates
+      // Round 64 splitting those apart. A reservation can now be fully
+      // verified (camera already confirmed it, slot occupied) at
+      // reassignment time; missing that here left the old slot's agent
+      // stuck in 'verified' forever and never armed the new slot's camera
+      // at all for a car that had physically moved.
+      if (selectedReservation.status === 'active' || selectedReservation.status === 'verified') {
         try {
           if (oldSlot) {
             await fetch(`${AGENT_SERVICE_URL}/agents/${oldSlot.id}/release`, { method: 'POST' });
