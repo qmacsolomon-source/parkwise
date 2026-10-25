@@ -312,34 +312,64 @@ export default function PlateVerification() {
     }
   };
 
+  // Despite the name and its place among the verification-completing
+  // actions, this used to only write an audit_log entry - no change to
+  // reservations/slots/agent_states at all, unlike its sibling Flag
+  // Unverified (which does update slots.status alongside its own audit
+  // entry). An attendant with no working camera had no actual way to
+  // verify a car through this button - it just silently recorded a note
+  // and nothing else. Now sets the reservation 'verified' directly (no
+  // agent-service call - this is meant to work even when the camera
+  // pipeline is unavailable); update_slot_status() in business_rules.sql
+  // already turns the slot 'occupied' off that same status change, no
+  // extra write needed here. check_pwd_slot_access() (same trigger that
+  // already guards every other reservation update) still applies, so a PWD
+  // slot whose customer isn't actually PWD-verified fails this the same as
+  // any other write - no separate check needed here either.
   const handleManualOverride = async () => {
     if (!overrideReason.trim()) {
       await dialog.alert('Please provide a reason for manual override');
       return;
     }
+    if (!selectedSlot || !selectedReservation) {
+      await dialog.alert('Select a reservation above first.');
+      return;
+    }
 
     setActionLoading(true);
     try {
+      const { error: verifyError } = await supabase
+        .from('reservations')
+        .update({ status: 'verified' })
+        .eq('id', selectedReservation.id);
+
+      if (verifyError) {
+        throw verifyError.message?.includes('PWD')
+          ? new Error('Cannot verify: this is a PWD slot and the customer is not PWD-verified.')
+          : verifyError;
+      }
+
       // Log to audit
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('audit_log').insert({
         actor_id: user?.id,
         action: 'manual_override',
         details: {
-          slot_id: selectedSlot?.id,
-          slot_code: selectedSlot?.slot_code,
+          slot_id: selectedSlot.id,
+          slot_code: selectedSlot.slot_code,
+          reservation_id: selectedReservation.id,
           reason: overrideReason,
         },
       });
 
       setShowManualOverride(false);
       setOverrideReason('');
-      setSuccessMessage(`Manual override recorded for slot ${selectedSlot?.slot_code}.`);
+      setSuccessMessage(`Manually verified and occupied slot ${selectedSlot.slot_code}.`);
       setTimeout(() => setSuccessMessage(''), 4000);
       loadData();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error with manual override:', error);
-      await dialog.alert('Failed to record manual override');
+      await dialog.alert(error?.message || 'Failed to record manual override');
     } finally {
       setActionLoading(false);
     }
