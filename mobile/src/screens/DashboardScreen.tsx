@@ -508,7 +508,11 @@ export default function DashboardScreen() {
             <View style={styles.heroTop}>
               <StatusChip
                 label={ongoing ? 'Parking now' : 'Upcoming'}
-                tone={ongoing ? 'warning' : 'info'}
+                // 'success', not 'warning' - "parking now" just means the
+                // booking is active and everything's working, not that
+                // anything needs attention. The amber alert-circle icon was
+                // reading as a problem at a glance.
+                tone={ongoing ? 'success' : 'info'}
               />
               <Text style={[typeToken('caption', textScale), { color: colors.tealTint }]}>
                 {activeReservation.booking_code}

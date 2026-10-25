@@ -1045,3 +1045,9 @@ Asked for a checklist review of every part of the system. Split into four parall
 - Minor: a frame-filename collision risk in `storage.py` (second-resolution timestamps, now microsecond), and one inaccurate comment in `live_upgrade/07_vehicles_is_active.sql` (text-only fix).
 
 New migrations: `19_agent_state_overstay_read.sql`, `20_tighten_notifications_insert.sql`, `21_unique_payment_per_reservation.sql`. Mirrored into `schema.sql`/`reset_database.sql`/`rls_policies.sql` as usual. Not fixed, lower priority/confidence: `LiveOccupancyDashboard.tsx`'s alert-sound subscriptions churning on every alert (inefficient, not incorrect), `ManualEntry.tsx`'s void-cancellation matching by slot+status rather than reservation id (flagged as fragile but not confirmed reachable), and the already-documented overstay/no-show double-penalty ambiguity in `create_penalty_on_status_change()`.
+
+## Round 78: "Parking now" badge looked like an alert
+
+Spotted during the live walkthrough - the Dashboard's "Parking now" chip (shown once a booking's window has actually started) used the amber `warning` tone, which reads as "something needs attention" at a glance even though it just means the booking is active and working correctly.
+
+- **`mobile/src/screens/DashboardScreen.tsx`**: switched the ongoing-booking chip from `tone="warning"` to `tone="success"` - green checkmark instead of amber alert-circle, matching what it actually means.
