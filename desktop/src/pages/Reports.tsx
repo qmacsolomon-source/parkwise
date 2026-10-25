@@ -105,12 +105,17 @@ export default function Reports() {
         .sort()
         .map((date) => ({ date, total: byDay[date] }));
 
-      // Calculate average stay duration
+      // Calculate average stay duration - only reservations that actually
+      // represent a real stay (completed, or overstay - which is still a
+      // genuine stay, just one that ran long). Previously had no status
+      // filter at all, so pending/cancelled/no_show reservations that
+      // never had a car park contributed their originally-booked duration
+      // to this "average stay" figure.
       let totalDuration = 0;
       let completedCount = 0;
       if (reservations) {
         reservations.forEach((r: any) => {
-          if (r.end_time && r.start_time) {
+          if ((r.status === 'completed' || r.status === 'overstay') && r.end_time && r.start_time) {
             const duration = (new Date(r.end_time).getTime() - new Date(r.start_time).getTime()) / (1000 * 60 * 60);
             totalDuration += duration;
             completedCount++;
@@ -122,22 +127,28 @@ export default function Reports() {
       // Count reservation statuses
       let noShows = 0;
       let overstays = 0;
-      let lateCancellations = 0;
       if (reservations) {
         reservations.forEach((r: any) => {
           if (r.status === 'no_show') noShows++;
           if (r.status === 'overstay') overstays++;
-          if (r.status === 'cancelled') lateCancellations++;
         });
       }
 
-      // Calculate penalties
+      // Calculate penalties, and derive "late cancellations" from the
+      // late_cancel penalty type rather than every cancellation -
+      // business_rules.sql's trigger only creates one of those when the
+      // cancellation actually happened inside late_cancel_window_minutes
+      // of the start time; counting raw status === 'cancelled' instead
+      // inflated this stat with every ordinary, well-ahead-of-time
+      // cancellation too.
       let penaltiesIssued = 0;
       let penaltiesCollected = 0;
+      let lateCancellations = 0;
       if (penalties) {
         penalties.forEach((p: any) => {
           penaltiesIssued += p.amount;
           if (p.status === 'paid') penaltiesCollected += p.amount;
+          if (p.type === 'late_cancel') lateCancellations++;
         });
       }
 

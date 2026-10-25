@@ -114,11 +114,21 @@ class Database:
     
     @classmethod
     async def update_slot_status(cls, slot_id: str, status: str, reservation_id: str = None):
-        """Update slot status."""
+        """
+        Update slot status.
+
+        current_reservation_id is always included, even when reservation_id
+        is None - it used to be omitted whenever the argument was falsy,
+        which meant release_vehicle()'s call (status='available',
+        reservation_id=None) never actually cleared the column. The slot
+        read back as available with current_reservation_id still pointing
+        at the reservation that was just released, and anything that looks
+        the reservation up through that column (e.g. the desktop's Live
+        Occupancy Dashboard) would show stale customer/vehicle details for
+        an empty slot.
+        """
         client = cls.get_client()
-        updates = {'status': status}
-        if reservation_id:
-            updates['current_reservation_id'] = reservation_id
+        updates = {'status': status, 'current_reservation_id': reservation_id}
         response = client.table('slots').update(updates).eq('id', slot_id).execute()
         logger.info("Slot status updated", slot_id=slot_id, status=status)
         return response.data

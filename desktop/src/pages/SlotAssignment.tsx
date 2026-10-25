@@ -175,7 +175,14 @@ export default function SlotAssignment() {
           profiles!inner(full_name),
           vehicles!inner(plate_number)
         `)
-        .in('status', ['pending', 'active'])
+        // 'verified' included so an already camera-verified reservation
+        // can actually be selected here at all - handleReassign() below
+        // explicitly branches on status === 'verified' (re-arming the new
+        // slot's camera for a car that physically moved, Round 67), but
+        // that branch was unreachable with this list missing it: nothing
+        // using this screen's own reservation list could ever be in that
+        // state in the first place.
+        .in('status', ['pending', 'active', 'verified'])
         .gte('start_time', new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString())
         .order('start_time');
 

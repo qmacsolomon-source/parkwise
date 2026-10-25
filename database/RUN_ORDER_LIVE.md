@@ -427,6 +427,46 @@ Live test (two phones): book or cancel on one phone while the other sits on
 the Dashboard or Reservation screen - the second phone's notice/clamp should
 update within a second or two, with no navigation needed.
 
+### `19_agent_state_overstay_read.sql` — customers can see their own camera photo again once they overstay
+
+`14_customer_agent_state_read.sql`'s policy only covered
+`'pending'/'active'/'verified'` - missing `'overstay'`, a real, reachable
+status. The moment a reservation went overstay, the customer's own RLS grant
+to read their own `agent_states` row (the "live camera check" photo on the
+dashboard) silently disappeared.
+
+**Expected result:** `Success. No rows returned`.
+
+### `20_tighten_notifications_insert.sql` — notifications INSERT policy was wide open to any signed-in client
+
+`"System can insert notifications"` was `WITH CHECK (true)` - not needed at
+all for the app's own notification flow (`create_notification()` is
+`SECURITY DEFINER` and bypasses RLS entirely), so its only live effect was
+letting any authenticated client insert a notification with an arbitrary
+`user_id`. Tightened to `is_staff()`, which still covers both real direct
+inserts in the codebase (desktop's Reassign and User Management).
+
+**Expected result:** `Success. No rows returned`.
+
+### `21_unique_payment_per_reservation.sql` — closes a real double-payment race
+
+`CashPayment.tsx` checks for an existing payment before inserting a new one,
+but that check-then-insert had no database-level backup - two attendant
+stations confirming payment on the same reservation close together could
+both pass the check and insert duplicate payment rows.
+
+**Before running this one**, check for existing duplicates (unlikely, but
+if any exist the constraint will fail to apply until resolved):
+
+```sql
+SELECT reservation_id, COUNT(*) FROM payments GROUP BY reservation_id HAVING COUNT(*) > 1;
+```
+
+Expected: no rows. If any come back, decide which duplicate to keep/refund
+before running this migration.
+
+**Expected result:** `Success. No rows returned`.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -482,6 +522,12 @@ WITH r AS (
   UNION ALL SELECT 'booking_limits_cache seeded', COUNT(*)::text, (COUNT(*) = 1) FROM public.booking_limits_cache
   UNION ALL SELECT 'booking_limits_cache realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
               WHERE pubname = 'supabase_realtime' AND tablename = 'booking_limits_cache'
+  UNION ALL SELECT 'agent_states policy includes overstay', 'has overstay', (pg_get_expr(polqual, polrelid) LIKE '%overstay%') FROM pg_policy
+              WHERE polname = 'Customers can view their own slot''s agent state'
+  UNION ALL SELECT 'notifications insert policy uses is_staff()', 'uses is_staff', (pg_get_expr(polwithcheck, polrelid) LIKE '%is_staff%') FROM pg_policy
+              WHERE polname = 'System can insert notifications'
+  UNION ALL SELECT 'payments.reservation_id UNIQUE', COUNT(*)::text, (COUNT(*) = 1) FROM pg_constraint
+              WHERE conname = 'payments_reservation_id_key'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -514,6 +560,9 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `get_booking_limits()` = **1**
 - `booking_limits_cache seeded` = **1**
 - `booking_limits_cache realtime` = **1**
+- `agent_states policy includes overstay` → `ok = true`
+- `notifications insert policy uses is_staff()` → `ok = true`
+- `payments.reservation_id UNIQUE` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

@@ -40,7 +40,18 @@ class SlotAgent:
         self.verified_at: Optional[datetime] = None
         self.overstay_timer: Optional[asyncio.Task] = None
         self.grace_timer: Optional[asyncio.Task] = None
-        
+
+        # process_frame() has several await points (Storage upload, DB
+        # calls) with shared mutable state (detected_plate, confidence,
+        # retry_count, state) read and written across them. Two frames for
+        # this slot landing close together without this lock could
+        # interleave - frame B's detection could overwrite frame A's before
+        # A's own check runs, or both could pass the match check and both
+        # call _verify_success(), producing duplicate verification_event
+        # rows. Low likelihood given the camera's send interval, but
+        # nothing server-side enforced that spacing.
+        self._frame_lock = asyncio.Lock()
+
         logger.info("SlotAgent initialized", slot_id=slot_id)
     
     async def initialize(self):
@@ -205,8 +216,17 @@ class SlotAgent:
 
     async def process_frame(self, frame_data: bytes):
         """
-        Process a camera frame.
-        Performs plate recognition and verification.
+        Process a camera frame - serialized per agent via _frame_lock so two
+        frames landing close together for this slot can't interleave their
+        reads/writes of detected_plate/confidence/retry_count/state.
+        """
+        async with self._frame_lock:
+            await self._process_frame_locked(frame_data)
+
+    async def _process_frame_locked(self, frame_data: bytes):
+        """
+        Performs plate recognition and verification. Only ever called from
+        process_frame(), which holds _frame_lock for the duration.
         """
         if self.state == AgentState.IDLE and settings.auto_arm_frames:
             # Hardware path: a camera just sent a frame for an idle slot, so arm
@@ -448,9 +468,15 @@ class SlotAgent:
         while self.state == AgentState.VERIFIED:
             await asyncio.sleep(settings.overstay_check_interval_seconds)
             
-            # Check if reservation has ended
+            # Check if reservation has ended. get_live_reservation(), not
+            # get_active_reservation() - this reservation was just set to
+            # 'verified' right before _start_overstay_monitoring() was
+            # called (see _verify_success()), so the status='active'-only
+            # lookup always found nothing here: this loop's end_time check
+            # never ran, and _handle_overstay() never fired, for every
+            # single verified reservation.
             if self.reservation_id:
-                reservation = await Database.get_active_reservation(self.slot_id)
+                reservation = await Database.get_live_reservation(self.slot_id)
                 if reservation:
                     end_time = datetime.fromisoformat(reservation['end_time'])
                     if datetime.utcnow() > end_time:

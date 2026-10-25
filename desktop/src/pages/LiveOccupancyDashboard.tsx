@@ -497,8 +497,18 @@ function SlotDrawer({
         },
       });
 
-      // Update slot status
-      const newStatus = slot.status === 'overstay' ? 'occupied' : 'occupied';
+      // Update slot status. Resolve Alert only ever shows for 'overstay'
+      // or 'unverified' (see the button's own condition below) - both
+      // branches of this ternary were identical, silently marking an
+      // 'unverified' alert (a real plate mismatch, PWD violation, or
+      // max-retries failure) as 'occupied' just because an attendant typed
+      // a note, directly violating this codebase's own rule that
+      // 'occupied' means the camera actually verified the plate
+      // (16_occupied_means_verified.sql). 'overstay' means the car is
+      // still legitimately there, so resolving that keeps it occupied;
+      // 'unverified' never had a real verification happen, so resolving it
+      // frees the slot instead of fabricating one.
+      const newStatus = slot.status === 'overstay' ? 'occupied' : 'available';
       await supabase.from('slots').update({ status: newStatus }).eq('id', slot.id);
 
       setShowResolveModal(false);

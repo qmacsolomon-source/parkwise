@@ -180,7 +180,14 @@ CREATE TABLE IF NOT EXISTS penalties (
 -- Payments table
 CREATE TABLE IF NOT EXISTS payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  -- UNIQUE, not just an index: CashPayment.tsx checks for an existing
+  -- payment before inserting a new one, but that check-then-insert has a
+  -- real TOCTOU race (no DB-level guard before this) - two attendant
+  -- stations confirming payment on the same reservation within the same
+  -- window could both pass the check and insert duplicate rows. This
+  -- constraint makes the second insert fail outright instead of silently
+  -- double-charging in the data.
+  reservation_id UUID NOT NULL UNIQUE REFERENCES reservations(id) ON DELETE CASCADE,
   base_charge NUMERIC NOT NULL DEFAULT 0,
   overstay_surcharge NUMERIC NOT NULL DEFAULT 0,
   penalty_total NUMERIC NOT NULL DEFAULT 0,

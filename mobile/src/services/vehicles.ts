@@ -128,15 +128,32 @@ export async function updateVehicle(
 
 /** True while the vehicle is attached to a booking that still occupies a bay. */
 export async function hasActiveReservation(vehicleId: string): Promise<boolean> {
-  const { count, error } = await requireClient()
-    .from('reservations')
-    .select('id', { count: 'exact', head: true })
-    .eq('vehicle_id', vehicleId)
-    .in('status', OPEN_STATUSES)
-    .gt('end_time', new Date().toISOString());
+  // 'overstay' means end_time has already passed by definition, so it
+  // can't share the end_time > now check the other open statuses need -
+  // without this split, a vehicle that's still physically parked past its
+  // booking read as having no active reservation, letting deleteVehicle()
+  // archive it while it was still in the lot.
+  const client = requireClient();
+  const nowIso = new Date().toISOString();
 
-  if (error) throw error;
-  return (count ?? 0) > 0;
+  const [openResult, overstayResult] = await Promise.all([
+    client
+      .from('reservations')
+      .select('id', { count: 'exact', head: true })
+      .eq('vehicle_id', vehicleId)
+      .in('status', OPEN_STATUSES)
+      .gt('end_time', nowIso),
+    client
+      .from('reservations')
+      .select('id', { count: 'exact', head: true })
+      .eq('vehicle_id', vehicleId)
+      .eq('status', 'overstay'),
+  ]);
+
+  if (openResult.error) throw openResult.error;
+  if (overstayResult.error) throw overstayResult.error;
+
+  return (openResult.count ?? 0) > 0 || (overstayResult.count ?? 0) > 0;
 }
 
 /** True when the vehicle has ever been used (any status, past or present). */

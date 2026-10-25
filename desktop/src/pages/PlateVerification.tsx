@@ -39,6 +39,23 @@ export default function PlateVerification() {
   const [successMessage, setSuccessMessage] = useState('');
 
   const [gracePeriodRemaining, setGracePeriodRemaining] = useState<number>(0);
+  // Default only used if /config can't be reached - matches agent.py's own
+  // Settings default, not a guess at the live .env value (which is 900s).
+  const [gracePeriodSeconds, setGracePeriodSeconds] = useState<number>(60);
+
+  // Read agent-service's actual configured grace period instead of
+  // guessing - this used to be hardcoded to 60s while the live .env's
+  // GRACE_PERIOD_SECONDS was really 900, so the countdown below hit zero
+  // 14 minutes before agent.py's own _grace_period_timer() would ever
+  // fire, making a car well within its real grace window look overdue.
+  useEffect(() => {
+    fetch(`${AGENT_SERVICE_URL}/config`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((config) => {
+        if (config?.grace_period_seconds) setGracePeriodSeconds(config.grace_period_seconds);
+      })
+      .catch(() => undefined);
+  }, []);
 
   // Load initial data
   useEffect(() => {
@@ -94,13 +111,12 @@ export default function PlateVerification() {
       const acceptedAt = new Date(agentState.accepted_at);
       const now = new Date();
       const elapsed = (now.getTime() - acceptedAt.getTime()) / 1000;
-      const gracePeriod = 60; // 60 seconds
-      const remaining = Math.max(0, gracePeriod - elapsed);
+      const remaining = Math.max(0, gracePeriodSeconds - elapsed);
       setGracePeriodRemaining(remaining);
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [selectedSlot, agentStates]);
+  }, [selectedSlot, agentStates, gracePeriodSeconds]);
 
   const loadData = async () => {
     try {
@@ -539,8 +555,15 @@ export default function PlateVerification() {
                   </div>
                 )}
 
-                {/* Grace Period Countdown */}
-                {agentStates[selectedSlot.id]?.state === 'verifying' && (
+                {/* Grace Period Countdown - 'waiting', not 'verifying': the
+                    real timer this mirrors (_grace_period_timer() in
+                    agent.py) only checks state === WAITING; once a frame
+                    moves it to VERIFYING, that timer's own check already
+                    no-ops, so showing this during 'verifying' displayed a
+                    countdown for a risk that had already passed, while
+                    hiding it during the 'waiting' window it actually
+                    applies to. */}
+                {agentStates[selectedSlot.id]?.state === 'waiting' && (
                   <div className="p-4 bg-amber-50 text-amber-800 rounded-lg mb-4 flex items-center gap-3">
                     <Clock size={24} />
                     <div>

@@ -16,11 +16,15 @@
 --        vehicle row is backfilled to TRUE (still active), matching how the
 --        fresh-install script behaves.
 --     2. reservations.vehicle_id's foreign key, changed from ON DELETE CASCADE
---        to ON DELETE RESTRICT - the same safety net the fresh-install script
---        has: even if something bypassed the app's own checks, the database
---        itself refuses to let a vehicle with booking history be hard-deleted.
---        (The app only ever hard-deletes a vehicle with zero reservations, so
---        this should never actually block anything in normal use.)
+--        to ON DELETE RESTRICT - the same safety net a fresh install ends up
+--        with (schema.sql/reset_database.sql still create it as CASCADE; the
+--        RESTRICT fix is actually applied by profile_vehicle_rates_fixes.sql,
+--        step 4 of RUN_ORDER.md - this file is this live database's own path
+--        to that same end state). Even if something bypassed the app's own
+--        checks, the database itself refuses to let a vehicle with booking
+--        history be hard-deleted. (The app only ever hard-deletes a vehicle
+--        with zero reservations, so this should never actually block anything
+--        in normal use.)
 --
 -- WHAT IT NEEDS
 --   Nothing beyond the base schema - profiles/vehicles/reservations tables

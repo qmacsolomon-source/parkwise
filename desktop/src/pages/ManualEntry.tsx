@@ -264,6 +264,17 @@ export default function ManualEntry() {
 
       if (existingVehicle) {
         vehicleId = existingVehicle.id;
+        // plate_number is globally unique (see vehicleErrorMessage()'s
+        // 23505 case) - this plate can only ever belong to one owner, so
+        // if it's not the walk-in profile just looked up/created by phone
+        // above, that profile is simply the wrong customer for this car
+        // (e.g. a different phone number than the one on their real
+        // account). Bind the reservation to the vehicle's actual owner
+        // instead of silently creating a reservation that points customer
+        // A at customer B's registered car.
+        if (existingVehicle.owner_id !== customerId) {
+          customerId = existingVehicle.owner_id;
+        }
       } else {
         const { data: newVehicle, error: vehicleError } = await supabase
           .from('vehicles')

@@ -216,7 +216,7 @@ CREATE POLICY "Customers can view their own slot's agent state" ON agent_states
       SELECT 1 FROM reservations r
       WHERE r.slot_id = agent_states.slot_id
         AND r.customer_id = auth.uid()
-        AND r.status IN ('pending', 'active', 'verified')
+        AND r.status IN ('pending', 'active', 'verified', 'overstay')
     )
   );
 
@@ -275,8 +275,15 @@ CREATE POLICY "Users can view own notifications" ON notifications
 CREATE POLICY "Users can update own notifications" ON notifications
   FOR UPDATE USING (user_id = auth.uid());
 
+-- create_notification() (business_rules.sql) is SECURITY DEFINER and
+-- bypasses RLS entirely as the function owner, so it never needed this
+-- policy open at all. Left WITH CHECK (true), any authenticated client
+-- (not just staff) could insert a notification with an arbitrary user_id,
+-- impersonating the system in another customer's inbox. The desktop's own
+-- direct inserts (SlotAssignment's Reassign, UserManagement) are both
+-- staff-authenticated, so is_staff() covers every real use.
 CREATE POLICY "System can insert notifications" ON notifications
-  FOR INSERT WITH CHECK (true);
+  FOR INSERT WITH CHECK (is_staff());
 
 -- Audit log policies
 CREATE POLICY "Users can view own audit entries" ON audit_log

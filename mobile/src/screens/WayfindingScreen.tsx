@@ -48,7 +48,7 @@ export default function WayfindingScreen() {
       .from('reservations')
       .select('id, slot_id, start_time, end_time')
       .eq('customer_id', profile.id)
-      .in('status', ['pending', 'active'])
+      .in('status', ['pending', 'active', 'verified', 'overstay'])
       .order('start_time', { ascending: true })
       .limit(1)
       .maybeSingle();

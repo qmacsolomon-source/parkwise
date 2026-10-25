@@ -121,15 +121,27 @@ export default function CashPayment() {
     const endTime = new Date(reservation.end_time);
     const now = new Date();
     
-    // Calculate reserved hours
+    // Calculate reserved hours - rounded UP to the whole hour, same rule
+    // every other part of this system bills by (mobile's booking
+    // estimate, assign_slot_for_reservation()'s CEIL(v_hours), and
+    // calculate_payment() in business_rules.sql). This used to charge the
+    // exact fractional duration instead, undercharging relative to what
+    // was quoted at booking time - a 1.5-hour booking at ₱50/hr quoted
+    // ₱100 but charged ₱75 here.
     const reservedHours = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
-    const baseCharge = Math.max(0, reservedHours * rates.hourly_rate);
+    const baseCharge = Math.max(0, Math.ceil(reservedHours) * rates.hourly_rate);
 
-    // Calculate overstay
+    // Calculate overstay - gated by the grace period, same rule
+    // calculate_payment() documents and RatesAndPricing.tsx's own preview
+    // calculator already applies. This used to charge overstay the instant
+    // `now` passed `end_time` with no grace window at all - every payment
+    // made within rates.grace_period_minutes of the booking ending was
+    // overcharged a full hour it shouldn't have owed yet.
     let overstayHours = 0;
     let overstaySurcharge = 0;
-    
-    if (now > endTime) {
+
+    const graceEnd = new Date(endTime.getTime() + rates.grace_period_minutes * 60 * 1000);
+    if (now > graceEnd) {
       overstayHours = (now.getTime() - endTime.getTime()) / (1000 * 60 * 60);
       // Round up to nearest hour for overstay
       const roundedOverstayHours = Math.ceil(overstayHours);
@@ -290,7 +302,17 @@ export default function CashPayment() {
       setAmountReceived('');
     } catch (err) {
       console.error('Payment error:', err);
-      setError('Failed to process payment');
+      // 23505 on payments.reservation_id's UNIQUE constraint (21_unique_
+      // payment_per_reservation.sql) - the check above for an existing
+      // payment has a real TOCTOU gap (a second attendant station could
+      // insert between that check and this insert), so this is the DB
+      // actually catching the race the check alone couldn't.
+      const code = (err as { code?: string } | null)?.code;
+      setError(
+        code === '23505'
+          ? 'This reservation was just paid (likely from another station). Refresh and check before charging again.'
+          : 'Failed to process payment'
+      );
     } finally {
       setProcessing(false);
     }

@@ -48,7 +48,7 @@ type RootStackParamList = {
 };
 
 /** A booking that still matters: not finished, not cancelled. */
-const OPEN_STATUSES = ['pending', 'active', 'verified'];
+const OPEN_STATUSES = ['pending', 'active', 'verified', 'overstay'];
 
 interface SlotInfo {
   slot_code: string;
@@ -294,7 +294,12 @@ export default function DashboardScreen() {
       reservations
         .filter(
           (row) =>
-            OPEN_STATUSES.includes(row.status) && new Date(row.end_time).getTime() > now
+            OPEN_STATUSES.includes(row.status) &&
+            // Overstay means end_time has already passed by definition -
+            // excluding it here would hide the hero card (and "Show me the
+            // way") at the exact moment an overstaying customer most needs
+            // it, right alongside the status list missing 'overstay' at all.
+            (row.status === 'overstay' || new Date(row.end_time).getTime() > now)
         )
         .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())[0] ?? null
     );

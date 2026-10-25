@@ -158,7 +158,7 @@ CREATE TABLE penalties (
 -- Payments table
 CREATE TABLE payments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  reservation_id UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+  reservation_id UUID NOT NULL UNIQUE REFERENCES reservations(id) ON DELETE CASCADE,
   base_charge NUMERIC NOT NULL DEFAULT 0,
   overstay_surcharge NUMERIC NOT NULL DEFAULT 0,
   penalty_total NUMERIC NOT NULL DEFAULT 0,

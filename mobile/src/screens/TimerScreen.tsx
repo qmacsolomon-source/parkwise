@@ -130,7 +130,7 @@ export default function TimerScreen() {
         (payload) => {
           if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
             const updated = payload.new as Reservation;
-            if (updated.status === 'active' || updated.status === 'verified') {
+            if (updated.status === 'active' || updated.status === 'verified' || updated.status === 'overstay') {
               setActiveReservation(updated);
               void loadSlotCode(updated.slot_id);
             } else {
@@ -177,7 +177,7 @@ export default function TimerScreen() {
         .from('reservations')
         .select('*')
         .eq('customer_id', profile.id)
-        .in('status', ['active', 'verified'])
+        .in('status', ['active', 'verified', 'overstay'])
         .order('start_time', { ascending: false })
         .limit(1)
         .single();

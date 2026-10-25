@@ -28,9 +28,15 @@ class Storage:
         try:
             client = cls.get_client()
             
-            # Generate filename
-            filename = f"{slot_id}/{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
-            
+            # Generate filename. Microsecond resolution, not just seconds -
+            # two frames processed within the same second for this slot
+            # (possible if a frame is ever re-POSTed, or a second camera is
+            # pointed at the same slot) would otherwise collide on this
+            # path; the upload has no upsert flag, so the second write
+            # would fail (silently, caught below) and that frame's photo
+            # would just never show up.
+            filename = f"{slot_id}/{timestamp.strftime('%Y%m%d_%H%M%S_%f')}.jpg"
+
             # Upload to storage
             response = client.storage.from_(settings.frame_storage_bucket).upload(
                 filename,

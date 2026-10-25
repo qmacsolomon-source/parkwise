@@ -53,6 +53,10 @@ class HealthResponse(BaseModel):
     uptime_seconds: float
 
 
+class ConfigResponse(BaseModel):
+    grace_period_seconds: int
+
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize agent manager on startup."""
@@ -77,6 +81,19 @@ async def health_check():
         agent_count=len(states),
         uptime_seconds=0.0  # TODO: track actual uptime
     )
+
+
+@app.get("/config", response_model=ConfigResponse)
+async def get_config():
+    """
+    Expose config the desktop console needs to render accurately, rather
+    than hardcoding a guess that can drift from this service's own .env.
+    PlateVerification.tsx's grace-period countdown used to hardcode 60
+    seconds while the live .env's GRACE_PERIOD_SECONDS was actually 900 -
+    the UI hit zero 14 minutes before the real timer (_grace_period_timer()
+    in agent.py) would ever fire.
+    """
+    return ConfigResponse(grace_period_seconds=settings.grace_period_seconds)
 
 
 @app.post("/frames/{slot_id}")

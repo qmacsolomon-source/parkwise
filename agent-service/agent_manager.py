@@ -27,6 +27,18 @@ class AgentManager:
         # deployment.
         self.camera_target_slot_id: Optional[str] = None
 
+        # The slot that actually last received a frame - distinct from
+        # camera_target_slot_id, which stays None until the first explicit
+        # /camera/target call. Needed because a frame can arm a slot via
+        # arm_from_reservation() before any attendant ever retargets
+        # anything (the camera's own hardcoded slot, used by
+        # resolve_camera_target()'s default). Without tracking this
+        # separately, the very first retarget of a session has no
+        # "previous" slot to suspend the grace timer on, reproducing the
+        # same false grace_period_expired alert suspend_grace_timer() exists
+        # to prevent.
+        self.last_frame_target_slot_id: Optional[str] = None
+
     def set_camera_target(self, slot_id: str) -> None:
         # The slot being moved away from, if it's still WAITING on a car
         # that simply hasn't arrived yet, has a grace_timer ticking down on
@@ -37,7 +49,7 @@ class AgentManager:
         # nobody actually failed to verify. Only WAITING needs this: once
         # past that into VERIFYING, _grace_period_timer()'s own state check
         # already no-ops; before it (IDLE) there's no timer to suspend.
-        previous_id = self.camera_target_slot_id
+        previous_id = self.last_frame_target_slot_id
         if previous_id and previous_id != slot_id:
             previous_agent = self.agents.get(previous_id)
             if isinstance(previous_agent, SlotAgent) and previous_agent.state == AgentState.WAITING:
@@ -46,7 +58,9 @@ class AgentManager:
         self.camera_target_slot_id = slot_id
 
     def resolve_camera_target(self, default_slot_id: str) -> str:
-        return self.camera_target_slot_id or default_slot_id
+        target = self.camera_target_slot_id or default_slot_id
+        self.last_frame_target_slot_id = target
+        return target
     
     async def initialize(self):
         """Initialize all agents from database."""
