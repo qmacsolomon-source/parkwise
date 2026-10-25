@@ -58,7 +58,13 @@ export default function CashPayment() {
   const loadData = async () => {
     try {
       const [reservationsData, slotsData, ratesData, customersData, vehiclesData, penaltiesData] = await Promise.all([
-        supabase.from('reservations').select('*').in('status', ['active', 'verified', 'overstay']),
+        // 'verified'/'overstay' only, not 'active' - 'active' means an
+        // attendant administratively accepted the vehicle on Slot
+        // Assignment, not that the camera ever actually confirmed the
+        // plate (16_occupied_means_verified.sql). Listing 'active' here let
+        // an attendant collect payment and release a car that was never
+        // camera-verified at all.
+        supabase.from('reservations').select('*').in('status', ['verified', 'overstay']),
         supabase.from('slots').select('*'),
         supabase.from('rates').select('*').single(),
         supabase.from('profiles').select('*'),
@@ -164,6 +170,15 @@ export default function CashPayment() {
   };
 
   const handleReservationSelect = (reservation: Reservation) => {
+    // Belt-and-suspenders alongside the query filter above - also covers
+    // the "came here from Live Occupancy's Release Vehicle" deep-link path
+    // below, which selects a reservation without going through this
+    // screen's own list at all.
+    if (reservation.status !== 'verified' && reservation.status !== 'overstay') {
+      setError('This vehicle has not been camera-verified yet. Complete verification on Plate Verification first.');
+      return;
+    }
+
     try {
       const calc = calculatePayment(reservation);
       setCalculation(calc);
