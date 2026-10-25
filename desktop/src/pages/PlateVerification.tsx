@@ -177,32 +177,47 @@ export default function PlateVerification() {
 
       if (activateError) throw activateError;
 
-      // Point the one real camera at this slot before arming it. With only
-      // one physical ESP32-CAM for testing, its firmware always posts
-      // frames tagged with whatever slot it was flashed for - this
-      // redirects every incoming frame to THIS slot instead, so it's the
-      // one that actually starts receiving real frames regardless of which
-      // slot the camera's firmware thinks it's watching. Harmless once a
-      // real second camera exists for this slot too; simply becomes a
-      // no-op redirect onto itself.
-      const targetResponse = await fetch(`${AGENT_SERVICE_URL}/camera/target`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ slot_ref: selectedSlot.id }),
-      });
-      if (!targetResponse.ok) throw new Error('Failed to point the camera at this slot');
+      // From here on, a failure leaves the reservation 'active' with
+      // nothing actually armed - unlike every other failure path in this
+      // system, nothing ever surfaces that later (no grace timer starts
+      // until accept_vehicle() actually runs), so it would otherwise sit
+      // silently "in progress" forever rather than visibly failing. Revert
+      // the activation on any failure here so "Failed to start
+      // verification" is actually true again, not a stale half-step.
+      try {
+        // Point the one real camera at this slot before arming it. With
+        // only one physical ESP32-CAM for testing, its firmware always
+        // posts frames tagged with whatever slot it was flashed for - this
+        // redirects every incoming frame to THIS slot instead, so it's the
+        // one that actually starts receiving real frames regardless of
+        // which slot the camera's firmware thinks it's watching. Harmless
+        // once a real second camera exists for this slot too; simply
+        // becomes a no-op redirect onto itself.
+        const targetResponse = await fetch(`${AGENT_SERVICE_URL}/camera/target`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot_ref: selectedSlot.id }),
+        });
+        if (!targetResponse.ok) throw new Error('Failed to point the camera at this slot');
 
-      // Arm the camera-matching agent - this is what actually starts
-      // verification, unlike Slot Assignment's accept, which never touches
-      // the camera at all.
-      const vehicle = vehicles[selectedReservation.vehicle_id];
-      const response = await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot.id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expected_plate: vehicle.plate_number }),
-      });
+        // Arm the camera-matching agent - this is what actually starts
+        // verification, unlike Slot Assignment's accept, which never
+        // touches the camera at all.
+        const vehicle = vehicles[selectedReservation.vehicle_id];
+        const response = await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot.id}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ expected_plate: vehicle.plate_number }),
+        });
 
-      if (!response.ok) throw new Error('Failed to start verification');
+        if (!response.ok) throw new Error('Failed to start verification');
+      } catch (agentError) {
+        await supabase
+          .from('reservations')
+          .update({ status: selectedReservation.status })
+          .eq('id', selectedReservation.id);
+        throw agentError;
+      }
 
       // Stay on this slot's panel, deliberately - starting verification is
       // the point where the attendant actually wants to watch the live
