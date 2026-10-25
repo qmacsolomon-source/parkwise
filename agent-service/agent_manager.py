@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict
+from typing import Dict, Optional
 from agent import SlotAgent
 from database import Database
 from logger import get_logger
@@ -11,10 +11,27 @@ class AgentManager:
     """
     Manages all slot agents as concurrent asyncio tasks.
     """
-    
+
     def __init__(self):
         self.agents: Dict[str, SlotAgent] = {}
         self.running = False
+
+        # With only one real ESP32-CAM available for testing, its firmware
+        # always posts frames tagged with its own hardcoded SLOT_CODE. This
+        # override lets the attendant "aim" that one camera at whichever
+        # slot they're actually testing, by redirecting every incoming
+        # frame to this slot instead of the one in the URL - see
+        # set_camera_target()/resolve_camera_target() and their use in
+        # main.py's receive_frame_raw. None means "use the frame's own
+        # slot", i.e. normal behavior for a real one-camera-per-slot
+        # deployment.
+        self.camera_target_slot_id: Optional[str] = None
+
+    def set_camera_target(self, slot_id: str) -> None:
+        self.camera_target_slot_id = slot_id
+
+    def resolve_camera_target(self, default_slot_id: str) -> str:
+        return self.camera_target_slot_id or default_slot_id
     
     async def initialize(self):
         """Initialize all agents from database."""

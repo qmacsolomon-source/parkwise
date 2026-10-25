@@ -43,6 +43,10 @@ class AcceptVehicleRequest(BaseModel):
     expected_plate: str
 
 
+class SetCameraTargetRequest(BaseModel):
+    slot_ref: str
+
+
 class HealthResponse(BaseModel):
     status: str
     agent_count: int
@@ -122,8 +126,18 @@ async def receive_frame_raw(slot_ref: str, request: Request):
         if not slot:
             raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_ref}")
 
-        logger.info("Raw frame received", slot_code=slot['slot_code'], size=len(frame_data))
-        await agent_manager.process_frame(slot['id'], frame_data)
+        # Normally the camera's own slot. While a camera target is set (see
+        # /camera/target), every frame is redirected there instead - lets
+        # one real camera simulate whichever slot the attendant is testing.
+        target_slot_id = agent_manager.resolve_camera_target(slot['id'])
+
+        logger.info(
+            "Raw frame received",
+            camera_slot_code=slot['slot_code'],
+            target_slot_id=target_slot_id,
+            size=len(frame_data),
+        )
+        await agent_manager.process_frame(target_slot_id, frame_data)
 
         return JSONResponse(content={"status": "processed", "slot_code": slot['slot_code']})
 
@@ -132,6 +146,39 @@ async def receive_frame_raw(slot_ref: str, request: Request):
     except Exception as e:
         logger.error("Failed to process raw frame", slot_ref=slot_ref, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/camera/target")
+async def set_camera_target(request: SetCameraTargetRequest):
+    """
+    Point the one real camera's incoming frames at a slot other than its own
+    hardcoded SLOT_CODE.
+
+    With only one physical ESP32-CAM available for testing, its firmware
+    always posts frames tagged with whatever slot it was flashed for. This
+    lets the desktop console redirect every incoming frame to a different
+    slot instead - the attendant just clicks Start Verification on whichever
+    slot they're testing (see PlateVerification.tsx), and this gets called
+    first so that slot's agent actually starts receiving real frames.
+
+    Does NOT touch whatever slot the camera was previously pointed at -
+    release_vehicle() resets slots.status to 'available' unconditionally,
+    so auto-releasing it here could desync a slot that still has a genuinely
+    live reservation. The old target just stops receiving frames and keeps
+    showing its last captured photo until released some other way.
+    """
+    target_slot = await Database.resolve_slot(request.slot_ref)
+    if not target_slot:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {request.slot_ref}")
+
+    agent_manager.set_camera_target(target_slot['id'])
+    logger.info("Camera retargeted", slot_id=target_slot['id'], slot_code=target_slot['slot_code'])
+
+    return JSONResponse(content={
+        "status": "retargeted",
+        "slot_id": target_slot['id'],
+        "slot_code": target_slot['slot_code'],
+    })
 
 
 @app.post("/beam/{slot_id}")

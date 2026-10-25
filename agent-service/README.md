@@ -109,6 +109,32 @@ Receive camera frame from ESP32-CAM.
 }
 ```
 
+### POST /camera/target
+Point the one real camera's incoming frames at a slot other than its own
+hardcoded `SLOT_CODE`. With only one physical ESP32-CAM available for
+testing, this is what lets the desktop console's "Start Verification" work
+on any slot - it calls this first, redirecting every frame the camera sends
+to the slot the attendant actually picked. Resets on service restart (not
+persisted); harmless once a real camera exists per slot, since pointing it
+at its own slot is a no-op.
+
+**Request Body**:
+```json
+{
+  "slot_ref": "1A1"
+}
+```
+`slot_ref` may be a slot_code or a slot UUID.
+
+**Response**:
+```json
+{
+  "status": "retargeted",
+  "slot_id": "uuid",
+  "slot_code": "1A1"
+}
+```
+
 ### POST /beam/{slot_id}
 Manual detection trigger (used by the desktop console's "trigger capture"
 button). It only logs; the camera sends its own frame separately.

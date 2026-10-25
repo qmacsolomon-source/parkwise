@@ -177,6 +177,21 @@ export default function PlateVerification() {
 
       if (activateError) throw activateError;
 
+      // Point the one real camera at this slot before arming it. With only
+      // one physical ESP32-CAM for testing, its firmware always posts
+      // frames tagged with whatever slot it was flashed for - this
+      // redirects every incoming frame to THIS slot instead, so it's the
+      // one that actually starts receiving real frames regardless of which
+      // slot the camera's firmware thinks it's watching. Harmless once a
+      // real second camera exists for this slot too; simply becomes a
+      // no-op redirect onto itself.
+      const targetResponse = await fetch(`${AGENT_SERVICE_URL}/camera/target`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot_ref: selectedSlot.id }),
+      });
+      if (!targetResponse.ok) throw new Error('Failed to point the camera at this slot');
+
       // Arm the camera-matching agent - this is what actually starts
       // verification, unlike Slot Assignment's accept, which never touches
       // the camera at all.
