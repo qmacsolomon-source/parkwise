@@ -18,6 +18,15 @@
 -- are no longer used (the schema's zone CHECK still allows them for
 -- upgrade compatibility, but nothing seeds them).
 
+-- Seed the booking_limits_cache row before anything touches slots/
+-- reservations below: trg_slot_refresh_booking_limits (business_rules.sql)
+-- fires on every slot insert and UPDATEs this row by id - if it doesn't
+-- exist yet, that UPDATE silently matches zero rows and the cache never
+-- gets created. The 8/8 default is immediately corrected by the very first
+-- slot insert's trigger fire anyway, so the exact starting values don't matter.
+INSERT INTO booking_limits_cache (id) VALUES (1)
+ON CONFLICT (id) DO NOTHING;
+
 -- Block A: {floor}A1..{floor}A60. Columns 8-12 of each row of 12 are PWD
 -- (i.e. zone_col 8-12, 20-24, 32-36, 44-48, 56-60).
 INSERT INTO slots (slot_code, is_pwd, status, floor, zone, zone_row, zone_col)
@@ -46,7 +55,7 @@ DO $$
 DECLARE
   t TEXT;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['slots', 'reservations', 'agent_states', 'notifications']
+  FOREACH t IN ARRAY ARRAY['slots', 'reservations', 'agent_states', 'notifications', 'booking_limits_cache']
   LOOP
     BEGIN
       EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE %I', t);

@@ -25,6 +25,7 @@ import {
 import {
   AssignSlotResult,
   BookingLimits,
+  DEFAULT_BOOKING_LIMITS,
   WindowSuggestion,
   assignSlotForReservation,
   changeReservationSlot,
@@ -112,10 +113,7 @@ export default function ReservationScreen() {
   const [changeBusy, setChangeBusy] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
 
-  const [bookingLimits, setBookingLimits] = useState<BookingLimits>({
-    pwdMaxHours: 8,
-    regularMaxHours: 8,
-  });
+  const [bookingLimits, setBookingLimits] = useState<BookingLimits>(DEFAULT_BOOKING_LIMITS);
 
   const startISO = start.toISOString();
   const endISO = end.toISOString();
@@ -154,10 +152,10 @@ export default function ReservationScreen() {
     void loadVehicles();
   }, [loadVehicles]);
 
-  // How far ahead booking currently reaches, lot-wide - same mirror-of-
-  // assign_slot_for_reservation reasoning as the Dashboard notice, refetched
-  // on any reservation/slot change so the clamp below stays current while
-  // this screen is open.
+  // How far ahead booking currently reaches, lot-wide - same reasoning as
+  // the Dashboard notice: booking_limits_cache is public-read and kept
+  // current by database triggers, so this stays live across every
+  // customer's activity, not just a refetch of this one's own reservations.
   useEffect(() => {
     void getBookingLimits().then(setBookingLimits);
   }, []);
@@ -167,12 +165,17 @@ export default function ReservationScreen() {
 
     const channel = supabase
       .channel('reserve-booking-limits')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
-        void getBookingLimits().then(setBookingLimits);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
-        void getBookingLimits().then(setBookingLimits);
-      })
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'booking_limits_cache' },
+        (payload) => {
+          const row = payload.new as { pwd_max_hours: number; regular_max_hours: number };
+          setBookingLimits({
+            pwdMaxHours: Number(row.pwd_max_hours),
+            regularMaxHours: Number(row.regular_max_hours),
+          });
+        }
+      )
       .subscribe();
 
     return () => {
@@ -254,7 +257,7 @@ export default function ReservationScreen() {
       return;
     }
 
-    const problem = validateWindow(startISO, endISO);
+    const problem = validateWindow(startISO, endISO, new Date(), effectiveAdvanceHours);
     if (problem) {
       setFormError(problem);
       return;

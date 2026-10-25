@@ -19,6 +19,7 @@ import {
 } from '../components/ui';
 import {
   BookingLimits,
+  DEFAULT_BOOKING_LIMITS,
   effectiveMaxAdvanceHours,
   formatAdvanceLimit,
   formatDuration,
@@ -104,10 +105,7 @@ export default function DashboardScreen() {
   // the same shrinking window. Plain useState on purpose: this notice
   // dismisses for the session and reappears on the next cold launch, it
   // never persists to storage.
-  const [bookingLimits, setBookingLimits] = useState<BookingLimits>({
-    pwdMaxHours: 8,
-    regularMaxHours: 8,
-  });
+  const [bookingLimits, setBookingLimits] = useState<BookingLimits>(DEFAULT_BOOKING_LIMITS);
   const [noticeDismissed, setNoticeDismissed] = useState(false);
 
   // Read inside the realtime callback, which must not re-subscribe per render.
@@ -165,10 +163,11 @@ export default function DashboardScreen() {
     void loadData();
   }, [loadData]);
 
-  // How far ahead booking currently reaches, lot-wide. Refetched on any
-  // reservation or slot change (same unfiltered-subscription pattern as
-  // useFloorPlan's live occupancy) since it depends on every customer's
-  // bookings, not just this one's.
+  // How far ahead booking currently reaches, lot-wide. booking_limits_cache
+  // is public-read and kept current by database triggers, so subscribing to
+  // IT (rather than `reservations`, which RLS would hide other customers'
+  // rows from) reaches this live across every customer, not just this one's
+  // own activity.
   useEffect(() => {
     void getBookingLimits().then(setBookingLimits);
   }, []);
@@ -178,12 +177,17 @@ export default function DashboardScreen() {
 
     const channel = supabase
       .channel('home-booking-limits')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
-        void getBookingLimits().then(setBookingLimits);
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
-        void getBookingLimits().then(setBookingLimits);
-      })
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'booking_limits_cache' },
+        (payload) => {
+          const row = payload.new as { pwd_max_hours: number; regular_max_hours: number };
+          setBookingLimits({
+            pwdMaxHours: Number(row.pwd_max_hours),
+            regularMaxHours: Number(row.regular_max_hours),
+          });
+        }
+      )
       .subscribe();
 
     return () => {

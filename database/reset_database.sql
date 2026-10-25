@@ -23,6 +23,7 @@
 CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 -- Safely drop existing tables in correct dependency order
+DROP TABLE IF EXISTS booking_limits_cache CASCADE;
 DROP TABLE IF EXISTS audit_log CASCADE;
 DROP TABLE IF EXISTS notifications CASCADE;
 DROP TABLE IF EXISTS rates CASCADE;
@@ -202,6 +203,14 @@ CREATE TABLE audit_log (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Booking limits cache table (see schema.sql for why this exists)
+CREATE TABLE booking_limits_cache (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  pwd_max_hours NUMERIC NOT NULL DEFAULT 8,
+  regular_max_hours NUMERIC NOT NULL DEFAULT 8,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Create indexes for performance
 CREATE INDEX idx_vehicles_owner ON vehicles(owner_id);
 CREATE INDEX idx_reservations_customer ON reservations(customer_id);
@@ -227,6 +236,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_limits_cache ENABLE ROW LEVEL SECURITY;
 
 ALTER TABLE slots
   ADD CONSTRAINT slots_current_reservation_fk

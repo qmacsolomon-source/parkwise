@@ -397,6 +397,36 @@ Expected: one row, `pwd_max_hours` and `regular_max_hours` each between 0 and
 8 depending on current fullness. On a freshly-seeded/mostly-empty database
 both should read 8.
 
+### `18_booking_limits_cache.sql` — makes the advance-booking limit actually live across every phone, not just the one that just booked
+
+`17`'s `get_booking_limits()` is correct whenever it's called, but the phone
+was calling it directly, and RLS ("Users can view own reservations") only
+lets a customer see their own rows - Realtime enforces that same RLS on
+`postgres_changes`, so a phone watching the `reservations` table for changes
+would never actually receive another customer's booking or cancellation.
+The dashboard notice and the reservation screen's clamp would only refresh
+on that customer's OWN activity or on re-opening the screen, not live. Adds
+`booking_limits_cache`, a tiny public-read single-row table holding just the
+two numbers (no customer data, so it's safe for everyone to read), kept
+current by a trigger on `reservations` and `slots`, and added to the
+`supabase_realtime` publication. The phone now reads/subscribes to this
+table instead of calling the RPC directly.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT * FROM booking_limits_cache WHERE id = 1;
+```
+
+Expected: one row, matching whatever `SELECT * FROM get_booking_limits();`
+(from `17`) returns right now.
+
+Live test (two phones): book or cancel on one phone while the other sits on
+the Dashboard or Reservation screen - the second phone's notice/clamp should
+update within a second or two, with no navigation needed.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -449,6 +479,9 @@ WITH r AS (
               WHERE conname = 'no_overlapping_reservations'
   UNION ALL SELECT 'get_booking_limits()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
               WHERE proname = 'get_booking_limits'
+  UNION ALL SELECT 'booking_limits_cache seeded', COUNT(*)::text, (COUNT(*) = 1) FROM public.booking_limits_cache
+  UNION ALL SELECT 'booking_limits_cache realtime', COUNT(*)::text, (COUNT(*) = 1) FROM pg_publication_tables
+              WHERE pubname = 'supabase_realtime' AND tablename = 'booking_limits_cache'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -479,6 +512,8 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `agent_states customer read policy` = **1**
 - `overlap constraint excludes terminal statuses` → `ok = true`
 - `get_booking_limits()` = **1**
+- `booking_limits_cache seeded` = **1**
+- `booking_limits_cache realtime` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

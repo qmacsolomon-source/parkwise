@@ -102,6 +102,8 @@ DROP POLICY IF EXISTS "Admins can view all audit entries" ON audit_log;
 DROP POLICY IF EXISTS "System can insert audit entries" ON audit_log;
 DROP POLICY IF EXISTS "Attendants can update audit log entries" ON audit_log;
 
+DROP POLICY IF EXISTS "Public can view booking limits" ON booking_limits_cache;
+
 -- Step 3: Recreate policies using helper functions
 
 -- Profiles policies
@@ -301,3 +303,14 @@ CREATE POLICY "System can insert audit entries" ON audit_log
 -- INSERT above).
 CREATE POLICY "Attendants can update audit log entries" ON audit_log
   FOR UPDATE USING (is_staff());
+
+-- Booking limits cache policies
+--
+-- Read-only for every signed-in customer (and anon, since a logged-out
+-- screen may still want to show it) - the whole point of this table is to
+-- be the one piece of lot-fullness data that isn't locked to a single
+-- customer the way `reservations` rows are. No INSERT/UPDATE/DELETE policy
+-- is defined: only refresh_booking_limits_cache() (SECURITY DEFINER, see
+-- business_rules.sql) ever writes to it.
+CREATE POLICY "Public can view booking limits" ON booking_limits_cache
+  FOR SELECT USING (true);

@@ -158,24 +158,35 @@ export interface BookingLimits {
   regularMaxHours: number;
 }
 
-/** Default when get_booking_limits() can't be reached - matches MAX_ADVANCE_HOURS in the SQL function, so an unreachable server fails open to "no extra restriction" rather than silently blocking every booking. */
-const DEFAULT_BOOKING_LIMITS: BookingLimits = { pwdMaxHours: 8, regularMaxHours: 8 };
+/** Default when booking_limits_cache can't be reached - matches MAX_ADVANCE_HOURS in the SQL function, so an unreachable server fails open to "no extra restriction" rather than silently blocking every booking. */
+export const DEFAULT_BOOKING_LIMITS: BookingLimits = { pwdMaxHours: 8, regularMaxHours: 8 };
 
 /**
  * How far ahead a new booking is currently allowed to reach - shrinks as the
- * lot fills up (see get_booking_limits() in
- * database/live_upgrade/17_booking_advance_limit.sql). Never throws, same
- * reasoning as fetchLatestRate: this drives a notice banner and a date-picker
- * clamp, not a hard gate by itself - the server's own check in
+ * lot fills up. Reads the single-row booking_limits_cache table (see
+ * database/live_upgrade/18_booking_limits_cache.sql) rather than calling
+ * get_booking_limits() directly: RLS only lets a customer SELECT their own
+ * reservations, and Realtime enforces that same RLS on postgres_changes, so
+ * a client-side subscription to `reservations` would never see another
+ * customer's booking. booking_limits_cache is public-read and kept current
+ * by triggers on reservations/slots, so subscribing to IT (see the two
+ * screens that call this) actually reaches every customer live. Never
+ * throws, same reasoning as fetchLatestRate: this drives a notice banner and
+ * a date-picker clamp, not a hard gate by itself - the server's own check in
  * assign_slot_for_reservation is the real enforcement.
  */
 export async function getBookingLimits(): Promise<BookingLimits> {
   if (!supabase) return DEFAULT_BOOKING_LIMITS;
 
-  const { data, error } = await supabase.rpc('get_booking_limits');
-  if (error || !data || !data[0]) return DEFAULT_BOOKING_LIMITS;
+  const { data, error } = await supabase
+    .from('booking_limits_cache')
+    .select('pwd_max_hours, regular_max_hours')
+    .eq('id', 1)
+    .maybeSingle();
 
-  const row = data[0] as { pwd_max_hours: number; regular_max_hours: number };
+  if (error || !data) return DEFAULT_BOOKING_LIMITS;
+
+  const row = data as { pwd_max_hours: number; regular_max_hours: number };
   return {
     pwdMaxHours: Number(row.pwd_max_hours),
     regularMaxHours: Number(row.regular_max_hours),
@@ -194,6 +205,7 @@ export function effectiveMaxAdvanceHours(limits: BookingLimits, pwdVerified: boo
 export function formatAdvanceLimit(hours: number): string {
   if (hours <= 0) return 'now only';
   const rounded = Math.round(hours * 4) / 4;
+  if (rounded <= 0) return 'now only';
   const whole = Math.floor(rounded);
   const minutes = Math.round((rounded - whole) * 60);
   if (whole && minutes) return `${whole} hr ${minutes} min`;

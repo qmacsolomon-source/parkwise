@@ -225,6 +225,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Booking limits cache: a single row holding the two numbers
+-- get_booking_limits() computes. Nothing customer-specific lives here, so
+-- it is safe to let every signed-in customer read it directly - which is
+-- the whole point. A client can never subscribe to live changes on
+-- `reservations` from another customer (RLS only lets each customer SELECT
+-- their own rows, and Realtime enforces that same RLS on postgres_changes),
+-- so a dashboard/reservation screen watching `reservations` directly would
+-- only ever "go live" on the signed-in customer's OWN bookings. Triggers
+-- below keep this row current on every reservation/slot change, and a
+-- public-read table's changes reach every subscriber instantly.
+CREATE TABLE IF NOT EXISTS booking_limits_cache (
+  id SMALLINT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  pwd_max_hours NUMERIC NOT NULL DEFAULT 8,
+  regular_max_hours NUMERIC NOT NULL DEFAULT 8,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_vehicles_owner ON vehicles(owner_id);
 CREATE INDEX IF NOT EXISTS idx_reservations_customer ON reservations(customer_id);
@@ -250,6 +267,7 @@ ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE booking_limits_cache ENABLE ROW LEVEL SECURITY;
 
 DO $$ BEGIN
   ALTER TABLE slots

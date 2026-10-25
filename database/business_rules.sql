@@ -90,6 +90,69 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- Function: get_booking_limits() - the real definition lives in
+-- floor_plan_and_assignment.sql (step 7), next to assign_slot_for_reservation,
+-- which is the function that actually enforces it. It's defined here too,
+-- identically, purely for run-order reasons: seed.sql (step 6) inserts the
+-- initial slots, which fires the trg_slot_refresh_booking_limits trigger
+-- below (step 3) - by the time ANY row is ever inserted into slots or
+-- reservations, this function has to already exist. CREATE OR REPLACE makes
+-- the later, identical definition in step 7 a harmless no-op.
+CREATE OR REPLACE FUNCTION get_booking_limits()
+RETURNS TABLE (pwd_max_hours NUMERIC, regular_max_hours NUMERIC)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  MAX_ADVANCE_HOURS CONSTANT NUMERIC := 8;
+  v_pwd_total     INTEGER;
+  v_pwd_committed INTEGER;
+  v_reg_total     INTEGER;
+  v_reg_committed INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO v_pwd_total FROM slots WHERE is_pwd = TRUE AND status <> 'maintenance';
+  SELECT COUNT(*) INTO v_reg_total FROM slots WHERE is_pwd = FALSE AND status <> 'maintenance';
+
+  SELECT COUNT(DISTINCT r.slot_id) INTO v_pwd_committed
+  FROM reservations r JOIN slots s ON s.id = r.slot_id
+  WHERE s.is_pwd = TRUE AND r.status NOT IN ('cancelled', 'completed', 'no_show');
+
+  SELECT COUNT(DISTINCT r.slot_id) INTO v_reg_committed
+  FROM reservations r JOIN slots s ON s.id = r.slot_id
+  WHERE s.is_pwd = FALSE AND r.status NOT IN ('cancelled', 'completed', 'no_show');
+
+  RETURN QUERY SELECT
+    CASE WHEN v_pwd_total = 0 THEN 0::NUMERIC
+         ELSE GREATEST(0, MAX_ADVANCE_HOURS * (1 - v_pwd_committed::NUMERIC / v_pwd_total)) END,
+    CASE WHEN v_reg_total = 0 THEN 0::NUMERIC
+         ELSE GREATEST(0, MAX_ADVANCE_HOURS * (1 - v_reg_committed::NUMERIC / v_reg_total)) END;
+END;
+$$;
+
+-- Function: Keep booking_limits_cache current after anything that could
+-- change lot fullness (a reservation's status, or a slot entering/leaving
+-- maintenance). SECURITY DEFINER so the write always succeeds regardless of
+-- which role's statement fired the trigger - a customer directly cancelling
+-- their own reservation via the RLS-gated "Users can cancel own
+-- reservations" policy has no grant on booking_limits_cache themselves.
+CREATE OR REPLACE FUNCTION refresh_booking_limits_cache()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  UPDATE booking_limits_cache bc
+  SET pwd_max_hours = l.pwd_max_hours,
+      regular_max_hours = l.regular_max_hours,
+      updated_at = NOW()
+  FROM get_booking_limits() l
+  WHERE bc.id = 1;
+  RETURN NULL;
+END;
+$$;
+
 -- Trigger: Prevent reservations for customers with unpaid penalties
 CREATE OR REPLACE FUNCTION check_unpaid_penalties()
 RETURNS TRIGGER AS $$
@@ -389,6 +452,11 @@ CREATE TRIGGER trg_reservation_update_slot
   AFTER INSERT OR UPDATE OR DELETE ON reservations
   FOR EACH ROW EXECUTE FUNCTION update_slot_status();
 
+DROP TRIGGER IF EXISTS trg_reservation_refresh_booking_limits ON reservations;
+CREATE TRIGGER trg_reservation_refresh_booking_limits
+  AFTER INSERT OR UPDATE OR DELETE ON reservations
+  FOR EACH ROW EXECUTE FUNCTION refresh_booking_limits_cache();
+
 DROP TRIGGER IF EXISTS trg_reservation_notify_created ON reservations;
 CREATE TRIGGER trg_reservation_notify_created
   AFTER INSERT ON reservations
@@ -408,6 +476,12 @@ DROP TRIGGER IF EXISTS trg_reservation_audit ON reservations;
 CREATE TRIGGER trg_reservation_audit
   AFTER INSERT OR UPDATE OR DELETE ON reservations
   FOR EACH ROW EXECUTE FUNCTION audit_reservation_changes();
+
+-- Slot triggers
+DROP TRIGGER IF EXISTS trg_slot_refresh_booking_limits ON slots;
+CREATE TRIGGER trg_slot_refresh_booking_limits
+  AFTER INSERT OR UPDATE OR DELETE ON slots
+  FOR EACH ROW EXECUTE FUNCTION refresh_booking_limits_cache();
 
 -- Payment triggers
 DROP TRIGGER IF EXISTS trg_payment_audit ON payments;
