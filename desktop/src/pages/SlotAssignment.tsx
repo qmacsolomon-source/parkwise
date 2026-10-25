@@ -12,6 +12,16 @@ import {
 
 const AGENT_SERVICE_URL = 'http://localhost:8000';
 
+// Accept Vehicle shouldn't be clickable hours before the customer could
+// plausibly have arrived - without this, nothing stopped administratively
+// "accepting" a reservation that starts well in the future, occupying the
+// bay before anyone's actually there.
+const EARLY_ACCEPT_WINDOW_MINUTES = 3;
+
+function canAcceptNow(startTime: string, now: Date): boolean {
+  return now.getTime() >= new Date(startTime).getTime() - EARLY_ACCEPT_WINDOW_MINUTES * 60_000;
+}
+
 interface ReservationWithDetails extends Reservation {
   slot_code: string;
   customer_name: string;
@@ -82,6 +92,14 @@ export default function SlotAssignment() {
   const [editingSlot, setEditingSlot] = useState<Slot | null>(null);
   const [showSlotSettings, setShowSlotSettings] = useState(false);
   const [floor, setFloor] = useState(1);
+  // Ticks so the early-accept gate below live-enables itself once a
+  // reservation's window opens, instead of staying stuck disabled until
+  // the attendant happens to reload the page.
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 15_000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleFloorChange = (newFloor: number) => {
     setFloor(newFloor);
@@ -410,6 +428,17 @@ export default function SlotAssignment() {
   // camera from here too), which collapsed the two stages into one and
   // made both screens' "Accept Vehicle" do the identical thing.
   const handleCheckIn = async (reservation: ReservationWithDetails) => {
+    // Belt-and-suspenders alongside the button's own disabled state - in
+    // case this ever gets called some other way.
+    if (!canAcceptNow(reservation.start_time, new Date())) {
+      setError(
+        `Too early to accept - this reservation can be accepted starting ${new Date(
+          new Date(reservation.start_time).getTime() - EARLY_ACCEPT_WINDOW_MINUTES * 60_000
+        ).toLocaleTimeString()}.`
+      );
+      return;
+    }
+
     setCheckingInId(reservation.id);
     setError('');
 
@@ -614,7 +643,11 @@ export default function SlotAssignment() {
                   </div>
                   <button
                     onClick={() => handleCheckIn(reservation)}
-                    disabled={checkingInId === reservation.id || reservation.status !== 'pending'}
+                    disabled={
+                      checkingInId === reservation.id ||
+                      reservation.status !== 'pending' ||
+                      !canAcceptNow(reservation.start_time, now)
+                    }
                     className="mt-3 w-full px-3 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-1.5"
                   >
                     <CheckCircle size={14} />
@@ -624,6 +657,15 @@ export default function SlotAssignment() {
                         ? 'Already accepted'
                         : 'Accept Vehicle'}
                   </button>
+                  {reservation.status === 'pending' && !canAcceptNow(reservation.start_time, now) && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Can be accepted starting{' '}
+                      {new Date(
+                        new Date(reservation.start_time).getTime() - EARLY_ACCEPT_WINDOW_MINUTES * 60_000
+                      ).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      .
+                    </p>
+                  )}
                   {reservation.status === 'active' && !camera && (
                     <p className="text-xs text-gray-500 mt-1">
                       Go to Plate Verification to start the camera check.
