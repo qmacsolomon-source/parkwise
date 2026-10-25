@@ -1,6 +1,6 @@
 import asyncio
 from typing import Dict, Optional
-from agent import SlotAgent
+from agent import SlotAgent, AgentState
 from database import Database
 from logger import get_logger
 
@@ -28,6 +28,21 @@ class AgentManager:
         self.camera_target_slot_id: Optional[str] = None
 
     def set_camera_target(self, slot_id: str) -> None:
+        # The slot being moved away from, if it's still WAITING on a car
+        # that simply hasn't arrived yet, has a grace_timer ticking down on
+        # real wall-clock time, independent of whether any more frames ever
+        # arrive for it. Left running, it has no way to tell "the camera
+        # moved away for testing" apart from "the car never showed up", and
+        # fires grace_period_expired regardless - a false alert on a slot
+        # nobody actually failed to verify. Only WAITING needs this: once
+        # past that into VERIFYING, _grace_period_timer()'s own state check
+        # already no-ops; before it (IDLE) there's no timer to suspend.
+        previous_id = self.camera_target_slot_id
+        if previous_id and previous_id != slot_id:
+            previous_agent = self.agents.get(previous_id)
+            if isinstance(previous_agent, SlotAgent) and previous_agent.state == AgentState.WAITING:
+                previous_agent.suspend_grace_timer()
+
         self.camera_target_slot_id = slot_id
 
     def resolve_camera_target(self, default_slot_id: str) -> str:

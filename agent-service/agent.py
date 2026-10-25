@@ -185,7 +185,24 @@ class SlotAgent:
         
         # Update slot status
         await Database.update_slot_status(self.slot_id, 'available', None)
-    
+
+    def suspend_grace_timer(self):
+        """
+        Cancel the grace-period timer without touching anything else -
+        used when the one real camera gets pointed at a different slot
+        (see AgentManager.set_camera_target()) while this slot is still
+        WAITING. Without this, _grace_period_timer() has no way to know
+        the camera moved away for testing rather than a real car just
+        never showing up, and would still fire grace_period_expired on
+        its own clock - wrongly alerting a slot nobody actually failed to
+        verify. Leaves state/expected_plate/etc. exactly as they are
+        (still WAITING, stale) - same "frozen, not wrong" treatment as the
+        rest of this slot once the camera moves on.
+        """
+        if self.grace_timer:
+            self.grace_timer.cancel()
+            self.grace_timer = None
+
     async def process_frame(self, frame_data: bytes):
         """
         Process a camera frame.

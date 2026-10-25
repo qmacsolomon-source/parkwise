@@ -167,18 +167,25 @@ async def set_camera_target(request: SetCameraTargetRequest):
     live reservation. The old target just stops receiving frames and keeps
     showing its last captured photo until released some other way.
     """
-    target_slot = await Database.resolve_slot(request.slot_ref)
-    if not target_slot:
-        raise HTTPException(status_code=404, detail=f"Unknown slot: {request.slot_ref}")
+    try:
+        target_slot = await Database.resolve_slot(request.slot_ref)
+        if not target_slot:
+            raise HTTPException(status_code=404, detail=f"Unknown slot: {request.slot_ref}")
 
-    agent_manager.set_camera_target(target_slot['id'])
-    logger.info("Camera retargeted", slot_id=target_slot['id'], slot_code=target_slot['slot_code'])
+        agent_manager.set_camera_target(target_slot['id'])
+        logger.info("Camera retargeted", slot_id=target_slot['id'], slot_code=target_slot['slot_code'])
 
-    return JSONResponse(content={
-        "status": "retargeted",
-        "slot_id": target_slot['id'],
-        "slot_code": target_slot['slot_code'],
-    })
+        return JSONResponse(content={
+            "status": "retargeted",
+            "slot_id": target_slot['id'],
+            "slot_code": target_slot['slot_code'],
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to set camera target", slot_ref=request.slot_ref, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/beam/{slot_id}")

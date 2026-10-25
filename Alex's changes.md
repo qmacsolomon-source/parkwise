@@ -996,3 +996,16 @@ Confirmed first that the backend already supports this cleanly: `agent_manager.p
 - Documented the new endpoint in `agent-service/README.md`, matching the existing API reference format.
 
 In-memory only, resets on agent-service restart - matches every other "this is the one-camera-for-now stand-in" characteristic already noted in this project (`SEND_INTERVAL_MS`, the WiFi/IP constants), not meant to be a permanent multi-camera architecture.
+
+## Round 74: bug-checked Round 73's camera-retargeting - found one real false-alert scenario, fixed it
+
+Asked directly for a bug-check on Round 73. Found one genuine issue and one minor consistency gap.
+
+**The real one:** `_grace_period_timer()` (`agent.py`) runs on its own wall-clock timer (`GRACE_PERIOD_SECONDS`, 900s / 15 min live) independent of whether any more frames ever arrive - it only checks `self.state == WAITING` when it wakes up. Round 73 deliberately left whatever slot the camera moves away from untouched (explained why in Round 73's notes: `release_vehicle()` would wrongly force `slots.status` back to `'available'`). But that means a slot still WAITING when the attendant moves on to test a different one has no way to tell "the camera moved away for testing" apart from "the car genuinely never showed up" - after 15 minutes, it fires `grace_period_expired` and alerts anyway, on a slot nobody actually failed to verify. During any real testing session longer than 15 minutes across multiple slots, this would have gone off repeatedly and looked like real failures.
+
+- **`agent-service/agent.py`**: new `SlotAgent.suspend_grace_timer()` - cancels just the grace timer, touches nothing else (state stays WAITING, stale, same as everything else Round 73 already leaves behind on purpose).
+- **`agent-service/agent_manager.py`**'s `set_camera_target()`: before switching, checks whether the slot being moved away from is still `WAITING` and calls `suspend_grace_timer()` on it if so. Only `WAITING` needs this - `_grace_period_timer()`'s own state check already no-ops once past it into `VERIFYING`, and `_overstay_monitor()` (for an already-`VERIFIED` slot left behind) is correctly left alone, since overstay is purely about the reservation's real end time, not the camera - that one SHOULD still fire if the time genuinely passes.
+
+**Minor consistency gap, also fixed:** `/camera/target` was the only route in `main.py` not wrapped in the same try/except + `logger.error(...)` pattern every other endpoint uses - a real failure there (e.g. a DB hiccup in `resolve_slot()`) would reach the client as a generic unhandled 500 instead of this service's own structured error response, and wouldn't get logged at all. Wrapped it to match.
+
+**Noted, not changed:** `handleStartVerification` now has one more network call (`/camera/target`) between activating the reservation and arming the agent - if that call fails, the reservation is left `'active'` with nothing actually armed. This is the same class of partial-failure risk the activate-before-accept ordering already carried before Round 73 (not a new category of problem, just one more link in an already non-atomic chain) - left as-is rather than adding rollback logic for what's still a one-real-camera testing aid.
