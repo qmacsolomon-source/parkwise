@@ -358,6 +358,17 @@ export default function SlotAssignment() {
           if (oldSlot) {
             await fetch(`${AGENT_SERVICE_URL}/agents/${oldSlot.id}/release`, { method: 'POST' });
           }
+          // Point the one real camera at the new slot before arming it -
+          // same reasoning as Plate Verification's Start Verification.
+          // Without this, arming newSlotId's agent just leaves it WAITING
+          // on a camera that's still pointed wherever it was last aimed,
+          // and after the grace period that looks exactly like a car that
+          // never showed up.
+          await fetch(`${AGENT_SERVICE_URL}/camera/target`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slot_ref: newSlotId }),
+          });
           await fetch(`${AGENT_SERVICE_URL}/agents/${newSlotId}/accept`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },

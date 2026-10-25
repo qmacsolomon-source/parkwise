@@ -314,6 +314,17 @@ export default function ManualEntry() {
       // succeeded above, so a missing/offline agent-service shouldn't make
       // the whole manual entry report as failed)
       try {
+        // Point the one real camera at this slot first - same reasoning as
+        // Plate Verification's Start Verification and Slot Assignment's
+        // Reassign. Without this, the accept call below just leaves the
+        // agent WAITING on a camera that's still pointed wherever it was
+        // last aimed, and after the grace period that looks exactly like a
+        // car that never showed up.
+        await fetch(`${AGENT_SERVICE_URL}/camera/target`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ slot_ref: selectedSlot }),
+        });
         await fetch(`${AGENT_SERVICE_URL}/agents/${selectedSlot}/accept`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
