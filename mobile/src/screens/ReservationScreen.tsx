@@ -24,15 +24,19 @@ import {
 } from '../components/ui';
 import {
   AssignSlotResult,
+  BookingLimits,
   WindowSuggestion,
   assignSlotForReservation,
   changeReservationSlot,
+  effectiveMaxAdvanceHours,
   estimateCharge,
   fetchLatestRate,
+  formatAdvanceLimit,
   formatDate,
   formatTime,
   formatWindow,
   formatDuration,
+  getBookingLimits,
   hoursBetween,
   suggestNearbyWindows,
   toBookingError,
@@ -108,6 +112,11 @@ export default function ReservationScreen() {
   const [changeBusy, setChangeBusy] = useState(false);
   const [changeError, setChangeError] = useState<string | null>(null);
 
+  const [bookingLimits, setBookingLimits] = useState<BookingLimits>({
+    pwdMaxHours: 8,
+    regularMaxHours: 8,
+  });
+
   const startISO = start.toISOString();
   const endISO = end.toISOString();
 
@@ -145,6 +154,32 @@ export default function ReservationScreen() {
     void loadVehicles();
   }, [loadVehicles]);
 
+  // How far ahead booking currently reaches, lot-wide - same mirror-of-
+  // assign_slot_for_reservation reasoning as the Dashboard notice, refetched
+  // on any reservation/slot change so the clamp below stays current while
+  // this screen is open.
+  useEffect(() => {
+    void getBookingLimits().then(setBookingLimits);
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('reserve-booking-limits')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        void getBookingLimits().then(setBookingLimits);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
+        void getBookingLimits().then(setBookingLimits);
+      })
+      .subscribe();
+
+    return () => {
+      void channel.unsubscribe();
+    };
+  }, []);
+
   /** Adds a vehicle from the Reserve empty state, then refreshes the list. */
   const handleAddVehicle = async (values: VehicleFormValues) => {
     if (!profile?.id) throw new Error('Please sign in again.');
@@ -171,7 +206,13 @@ export default function ReservationScreen() {
     realtime: step === 'result' || changing,
   });
 
-  const windowError = validateWindow(startISO, endISO);
+  const effectiveAdvanceHours = useMemo(
+    () => effectiveMaxAdvanceHours(bookingLimits, !!profile?.pwd_verified),
+    [bookingLimits, profile?.pwd_verified]
+  );
+  const fullyBooked = effectiveAdvanceHours <= 0;
+
+  const windowError = validateWindow(startISO, endISO, new Date(), effectiveAdvanceHours);
   const charge = estimateCharge(startISO, endISO, rate?.hourly_rate ?? null);
   const noSlotAvailable = !!formError && formError.includes('Every bay is taken');
 
@@ -446,6 +487,23 @@ export default function ReservationScreen() {
 
   return (
     <AppScreen header={header} tab="Reserve" scroll>
+      {fullyBooked ? (
+        <Card style={{ borderColor: colors.danger, backgroundColor: colors.dangerTint }}>
+          <View style={styles.alertRow}>
+            <Ionicons name="alert-circle" size={20} color={colors.danger} />
+            <Text style={[typeToken('body', textScale), styles.flexText, { color: colors.danger }]}>
+              The lot is fully booked right now - every bay already has a reservation against it.
+              New bookings will open up as slots clear.
+            </Text>
+          </View>
+        </Card>
+      ) : effectiveAdvanceHours < 8 ? (
+        <Text style={[typeToken('small', textScale), styles.footnote, { color: colors.textMuted }]}>
+          The lot is filling up, so you can currently book up to {formatAdvanceLimit(effectiveAdvanceHours)}{' '}
+          ahead.
+        </Text>
+      ) : null}
+
       {/* 1. vehicle */}
       <SectionHeader title="Vehicle" />
       {vehiclesLoading ? (
@@ -527,6 +585,9 @@ export default function ReservationScreen() {
           value={picker.field === 'start' ? start : end}
           mode={picker.mode}
           minimumDate={picker.field === 'end' ? start : new Date()}
+          maximumDate={
+            picker.field === 'start' ? new Date(Date.now() + effectiveAdvanceHours * 3_600_000) : undefined
+          }
           onChange={onPickerChange}
         />
       ) : null}
@@ -637,7 +698,7 @@ export default function ReservationScreen() {
         size="lg"
         icon="search"
         onPress={findSlot}
-        disabled={!!windowError || !vehicleId}
+        disabled={!!windowError || !vehicleId || fullyBooked}
         accessibilityHint="Assigns the closest free bay for the chosen time"
         style={styles.cta}
       />

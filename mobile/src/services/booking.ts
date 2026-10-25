@@ -27,6 +27,7 @@ export type BookingErrorCode =
   | 'SLOT_TAKEN'
   | 'NOT_ALLOWED'
   | 'PWD_ONLY'
+  | 'BOOKING_TOO_FAR_AHEAD'
   | 'UNKNOWN';
 
 const MESSAGES: Record<BookingErrorCode, string> = {
@@ -42,6 +43,8 @@ const MESSAGES: Record<BookingErrorCode, string> = {
   SLOT_TAKEN: 'Someone just took that bay. The plan has been refreshed with the latest availability.',
   NOT_ALLOWED: 'That booking can no longer be changed.',
   PWD_ONLY: 'That is a PWD bay, and your account is not PWD-verified.',
+  BOOKING_TOO_FAR_AHEAD:
+    "The lot is getting full, so advance booking is limited right now. Check the notice on your dashboard for how far ahead you can currently book.",
   UNKNOWN: 'Something went wrong. Please try again.',
 };
 
@@ -150,6 +153,54 @@ export async function fetchLatestRate(): Promise<RateLookup> {
   return { rate: (data as Rate) ?? null, error: null };
 }
 
+export interface BookingLimits {
+  pwdMaxHours: number;
+  regularMaxHours: number;
+}
+
+/** Default when get_booking_limits() can't be reached - matches MAX_ADVANCE_HOURS in the SQL function, so an unreachable server fails open to "no extra restriction" rather than silently blocking every booking. */
+const DEFAULT_BOOKING_LIMITS: BookingLimits = { pwdMaxHours: 8, regularMaxHours: 8 };
+
+/**
+ * How far ahead a new booking is currently allowed to reach - shrinks as the
+ * lot fills up (see get_booking_limits() in
+ * database/live_upgrade/17_booking_advance_limit.sql). Never throws, same
+ * reasoning as fetchLatestRate: this drives a notice banner and a date-picker
+ * clamp, not a hard gate by itself - the server's own check in
+ * assign_slot_for_reservation is the real enforcement.
+ */
+export async function getBookingLimits(): Promise<BookingLimits> {
+  if (!supabase) return DEFAULT_BOOKING_LIMITS;
+
+  const { data, error } = await supabase.rpc('get_booking_limits');
+  if (error || !data || !data[0]) return DEFAULT_BOOKING_LIMITS;
+
+  const row = data[0] as { pwd_max_hours: number; regular_max_hours: number };
+  return {
+    pwdMaxHours: Number(row.pwd_max_hours),
+    regularMaxHours: Number(row.regular_max_hours),
+  };
+}
+
+/** The limit that actually applies to this customer - the more generous of
+ * the two pools when they're PWD-verified (they can already fall back to a
+ * regular bay), otherwise just the regular pool's limit. */
+export function effectiveMaxAdvanceHours(limits: BookingLimits, pwdVerified: boolean): number {
+  return pwdVerified ? Math.max(limits.pwdMaxHours, limits.regularMaxHours) : limits.regularMaxHours;
+}
+
+/** "3 hr 30 min" / "45 min" / "now only" - same rounding (nearest 15 min)
+ * for the dashboard notice and the reservation screen's own copy of it. */
+export function formatAdvanceLimit(hours: number): string {
+  if (hours <= 0) return 'now only';
+  const rounded = Math.round(hours * 4) / 4;
+  const whole = Math.floor(rounded);
+  const minutes = Math.round((rounded - whole) * 60);
+  if (whole && minutes) return `${whole} hr ${minutes} min`;
+  if (whole) return `${whole} hour${whole === 1 ? '' : 's'}`;
+  return `${minutes} min`;
+}
+
 export function hoursBetween(start: string, end: string): number {
   return (new Date(end).getTime() - new Date(start).getTime()) / 3600000;
 }
@@ -163,8 +214,18 @@ export function estimateCharge(start: string, end: string, hourlyRate: number | 
 /**
  * Local pre-flight check. Returns a message to show under the time fields, or
  * null when the window looks fine. The server re-checks everything.
+ *
+ * maxAdvanceHours is optional (defaults to no extra restriction) so existing
+ * callers that don't pass it behave exactly as before - it's meant to be the
+ * result of effectiveMaxAdvanceHours(), checked here as a fast, local
+ * mirror of assign_slot_for_reservation's own BOOKING_TOO_FAR_AHEAD check.
  */
-export function validateWindow(start: string, end: string, now: Date = new Date()): string | null {
+export function validateWindow(
+  start: string,
+  end: string,
+  now: Date = new Date(),
+  maxAdvanceHours: number = Infinity
+): string | null {
   const from = new Date(start).getTime();
   const to = new Date(end).getTime();
 
@@ -175,6 +236,7 @@ export function validateWindow(start: string, end: string, now: Date = new Date(
   }
   if (to - from > MAX_DURATION_HOURS * 3_600_000) return MESSAGES.TOO_LONG;
   if (from < now.getTime() - PAST_TOLERANCE_MINUTES * 60_000) return MESSAGES.PAST_START;
+  if (from > now.getTime() + maxAdvanceHours * 3_600_000) return MESSAGES.BOOKING_TOO_FAR_AHEAD;
 
   return null;
 }

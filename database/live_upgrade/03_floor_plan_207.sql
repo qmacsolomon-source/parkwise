@@ -352,6 +352,48 @@ BEGIN
 END;
 $$;
 
+-- 6b. get_booking_limits() ----------------------------------------------
+-- How far ahead a NEW booking is currently allowed to reach, shrinking from
+-- 8 hours (pool empty) to 0 (every slot in that pool has some live
+-- reservation against it, now or later - 'cancelled'/'completed'/'no_show'
+-- don't count). Computed separately for PWD and regular slots since they
+-- are different-sized, mostly-separate pools (is_pwd_verified() is the only
+-- thing that can cross between them). SECURITY DEFINER + a dedicated
+-- function (not inlined only in assign_slot_for_reservation) so the phone
+-- can also call this directly to show the current limit before the
+-- customer even opens the time picker.
+CREATE OR REPLACE FUNCTION get_booking_limits()
+RETURNS TABLE (pwd_max_hours NUMERIC, regular_max_hours NUMERIC)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  MAX_ADVANCE_HOURS CONSTANT NUMERIC := 8;
+  v_pwd_total     INTEGER;
+  v_pwd_committed INTEGER;
+  v_reg_total     INTEGER;
+  v_reg_committed INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO v_pwd_total FROM slots WHERE is_pwd = TRUE AND status <> 'maintenance';
+  SELECT COUNT(*) INTO v_reg_total FROM slots WHERE is_pwd = FALSE AND status <> 'maintenance';
+
+  SELECT COUNT(DISTINCT r.slot_id) INTO v_pwd_committed
+  FROM reservations r JOIN slots s ON s.id = r.slot_id
+  WHERE s.is_pwd = TRUE AND r.status NOT IN ('cancelled', 'completed', 'no_show');
+
+  SELECT COUNT(DISTINCT r.slot_id) INTO v_reg_committed
+  FROM reservations r JOIN slots s ON s.id = r.slot_id
+  WHERE s.is_pwd = FALSE AND r.status NOT IN ('cancelled', 'completed', 'no_show');
+
+  RETURN QUERY SELECT
+    CASE WHEN v_pwd_total = 0 THEN 0::NUMERIC
+         ELSE GREATEST(0, MAX_ADVANCE_HOURS * (1 - v_pwd_committed::NUMERIC / v_pwd_total)) END,
+    CASE WHEN v_reg_total = 0 THEN 0::NUMERIC
+         ELSE GREATEST(0, MAX_ADVANCE_HOURS * (1 - v_reg_committed::NUMERIC / v_reg_total)) END;
+END;
+$$;
+
 -- 7. assign_slot_for_reservation(vehicle, start, end) ----------------------
 -- SECURITY DEFINER: the caller never passes a customer id, only their own
 -- vehicle. Picks the best free slot atomically (row locks + SKIP LOCKED, and a
@@ -380,6 +422,9 @@ DECLARE
   v_res     reservations;
   v_rate    NUMERIC;
   v_hours   NUMERIC;
+  v_pwd_max_hours     NUMERIC;
+  v_regular_max_hours NUMERIC;
+  v_max_advance_hours NUMERIC;
 BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION 'AUTH_REQUIRED';
@@ -408,6 +453,23 @@ BEGIN
   END IF;
 
   v_pwd := is_pwd_verified(v_uid);
+
+  -- Shrinking advance-booking window: the fuller the lot, the less far
+  -- ahead a NEW booking may reach - down to 0 hours (book now or not at
+  -- all) once every slot in the applicable pool has some live reservation
+  -- against it. A PWD-verified customer can already fall back to a
+  -- non-PWD bay (the slot-picking WHERE clause below has always allowed
+  -- that), so they get whichever pool's limit is more generous rather than
+  -- being wrongly throttled by PWD-specific fullness alone when they can
+  -- still reach the regular pool.
+  SELECT pwd_max_hours, regular_max_hours INTO v_pwd_max_hours, v_regular_max_hours
+  FROM get_booking_limits();
+  v_max_advance_hours := CASE WHEN v_pwd THEN GREATEST(v_pwd_max_hours, v_regular_max_hours)
+                               ELSE v_regular_max_hours END;
+
+  IF p_start > NOW() + (v_max_advance_hours * INTERVAL '1 hour') THEN
+    RAISE EXCEPTION 'BOOKING_TOO_FAR_AHEAD';
+  END IF;
 
   LOOP
     v_attempt := v_attempt + 1;
@@ -590,9 +652,11 @@ $$;
 REVOKE ALL ON FUNCTION get_floor_plan(TIMESTAMPTZ, TIMESTAMPTZ) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION assign_slot_for_reservation(UUID, TIMESTAMPTZ, TIMESTAMPTZ) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION change_reservation_slot(UUID, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION get_booking_limits() FROM PUBLIC, anon;
 
 GRANT EXECUTE ON FUNCTION get_floor_plan(TIMESTAMPTZ, TIMESTAMPTZ) TO authenticated;
 GRANT EXECUTE ON FUNCTION assign_slot_for_reservation(UUID, TIMESTAMPTZ, TIMESTAMPTZ) TO authenticated;
 GRANT EXECUTE ON FUNCTION change_reservation_slot(UUID, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION get_booking_limits() TO authenticated;
 
 COMMIT;

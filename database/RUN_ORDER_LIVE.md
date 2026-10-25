@@ -372,6 +372,31 @@ Quick check (manual, not a query): accept a vehicle on Slot Assignment and
 confirm the slot shows `reserved`, not `occupied`, until Plate Verification's
 Accept Vehicle actually verifies the plate.
 
+### `17_booking_advance_limit.sql` — how far ahead a new booking can reach shrinks as the lot fills up
+
+Adds `get_booking_limits()` and changes `assign_slot_for_reservation()` to
+reject a booking that starts too far in the future. The allowed window is 8
+hours when a pool (PWD or regular slots) is empty, shrinking linearly down to
+0 hours (book now or not at all) once every slot in that pool has some live
+reservation against it - `'cancelled'`/`'completed'`/`'no_show'` don't count,
+everything else does, whether it's happening right now or booked for later
+today. Computed separately for PWD and regular slots, but a PWD-verified
+customer gets whichever of the two is more generous, since they can already
+fall back to a non-PWD bay. `CREATE OR REPLACE` for both functions, no DROP
+needed.
+
+**Expected result:** `Success. No rows returned`.
+
+Quick check (paste on its own):
+
+```sql
+SELECT * FROM get_booking_limits();
+```
+
+Expected: one row, `pwd_max_hours` and `regular_max_hours` each between 0 and
+8 depending on current fullness. On a freshly-seeded/mostly-empty database
+both should read 8.
+
 ---
 
 ## 3. Final check — "is everything installed?"
@@ -422,6 +447,8 @@ WITH r AS (
               WHERE polrelid = 'public.agent_states'::regclass AND polname = 'Customers can view their own slot''s agent state'
   UNION ALL SELECT 'overlap constraint excludes terminal statuses', 'has WHERE', (pg_get_constraintdef(oid) LIKE '%WHERE%') FROM pg_constraint
               WHERE conname = 'no_overlapping_reservations'
+  UNION ALL SELECT 'get_booking_limits()', COUNT(*)::text, (COUNT(*) = 1) FROM pg_proc
+              WHERE proname = 'get_booking_limits'
 )
 SELECT item, value, ok FROM r ORDER BY ok, item;
 ```
@@ -451,6 +478,7 @@ SELECT item, value, ok FROM r ORDER BY ok, item;
 - `frames bucket` = **1**
 - `agent_states customer read policy` = **1**
 - `overlap constraint excludes terminal statuses` → `ok = true`
+- `get_booking_limits()` = **1**
 
 If any `ok` is `false`, note which row and stop — do not re-run random files.
 

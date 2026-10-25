@@ -17,7 +17,15 @@ import {
   StatusChip,
   useToast,
 } from '../components/ui';
-import { formatDuration, formatTime, formatWindow } from '../services/booking';
+import {
+  BookingLimits,
+  effectiveMaxAdvanceHours,
+  formatAdvanceLimit,
+  formatDuration,
+  formatTime,
+  formatWindow,
+  getBookingLimits,
+} from '../services/booking';
 import { radius, spacing, TOUCH_TARGET, type as typeToken } from '../theme/tokens';
 
 type RootStackParamList = {
@@ -92,6 +100,16 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [tick, setTick] = useState(() => Date.now());
 
+  // Lot-wide, not per-customer - everyone competing for the same bays sees
+  // the same shrinking window. Plain useState on purpose: this notice
+  // dismisses for the session and reappears on the next cold launch, it
+  // never persists to storage.
+  const [bookingLimits, setBookingLimits] = useState<BookingLimits>({
+    pwdMaxHours: 8,
+    regularMaxHours: 8,
+  });
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
+
   // Read inside the realtime callback, which must not re-subscribe per render.
   const reservationsRef = useRef<Reservation[]>([]);
   useEffect(() => {
@@ -146,6 +164,32 @@ export default function DashboardScreen() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  // How far ahead booking currently reaches, lot-wide. Refetched on any
+  // reservation or slot change (same unfiltered-subscription pattern as
+  // useFloorPlan's live occupancy) since it depends on every customer's
+  // bookings, not just this one's.
+  useEffect(() => {
+    void getBookingLimits().then(setBookingLimits);
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    const channel = supabase
+      .channel('home-booking-limits')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        void getBookingLimits().then(setBookingLimits);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
+        void getBookingLimits().then(setBookingLimits);
+      })
+      .subscribe();
+
+    return () => {
+      void channel.unsubscribe();
+    };
+  }, []);
 
   // A minute-resolution countdown: the Timer screen is the one that ticks.
   useEffect(() => {
@@ -256,6 +300,41 @@ export default function DashboardScreen() {
 
   const recentReservations = useMemo(() => reservations.slice(0, 2), [reservations]);
 
+  const effectiveAdvanceHours = useMemo(
+    () => effectiveMaxAdvanceHours(bookingLimits, !!profile?.pwd_verified),
+    [bookingLimits, profile?.pwd_verified]
+  );
+
+  const advanceNotice = useMemo(() => {
+    if (effectiveAdvanceHours <= 0) {
+      return {
+        tone: 'danger' as const,
+        title: 'The lot is fully booked',
+        message: 'Every bay already has a reservation against it. New bookings will open up as slots clear.',
+      };
+    }
+    if (effectiveAdvanceHours < 8) {
+      return {
+        tone: 'warning' as const,
+        title: 'Advance booking is limited',
+        message: `The lot is filling up, so you can currently book up to ${formatAdvanceLimit(
+          effectiveAdvanceHours
+        )} ahead.`,
+      };
+    }
+    return {
+      tone: 'info' as const,
+      title: 'Advance booking is open',
+      message: `You can currently book up to ${formatAdvanceLimit(effectiveAdvanceHours)} ahead.`,
+    };
+  }, [effectiveAdvanceHours]);
+
+  const noticeColors = {
+    danger: { border: colors.danger, tint: colors.dangerTint },
+    warning: { border: colors.warning, tint: colors.warningTint },
+    info: { border: colors.info, tint: colors.infoTint },
+  }[advanceNotice.tone];
+
   const unpaidTotal = useMemo(
     () => penalties.reduce((sum, penalty) => sum + (Number(penalty.amount) || 0), 0),
     [penalties]
@@ -350,6 +429,40 @@ export default function DashboardScreen() {
 
   return (
     <AppScreen header={header} tab="Home" refreshing={refreshing} onRefresh={onRefresh}>
+      {!noticeDismissed ? (
+        <Card
+          style={{
+            ...styles.block,
+            borderColor: noticeColors.border,
+            backgroundColor: noticeColors.tint,
+          }}
+        >
+          <View style={styles.warningRow}>
+            <Ionicons
+              name={advanceNotice.tone === 'info' ? 'information-circle' : 'alert-circle'}
+              size={22}
+              color={noticeColors.border}
+            />
+            <View style={styles.flexText}>
+              <Text style={[typeToken('bodyStrong', textScale), { color: noticeColors.border }]}>
+                {advanceNotice.title}
+              </Text>
+              <Text style={[typeToken('small', textScale), { color: noticeColors.border }]}>
+                {advanceNotice.message}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => setNoticeDismissed(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss notice"
+              hitSlop={8}
+            >
+              <Ionicons name="close" size={20} color={noticeColors.border} />
+            </Pressable>
+          </View>
+        </Card>
+      ) : null}
+
       {penalties.length > 0 ? (
         <Card
           style={{
