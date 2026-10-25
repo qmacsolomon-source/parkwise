@@ -1051,3 +1051,9 @@ New migrations: `19_agent_state_overstay_read.sql`, `20_tighten_notifications_in
 Spotted during the live walkthrough - the Dashboard's "Parking now" chip (shown once a booking's window has actually started) used the amber `warning` tone, which reads as "something needs attention" at a glance even though it just means the booking is active and working correctly.
 
 - **`mobile/src/screens/DashboardScreen.tsx`**: switched the ongoing-booking chip from `tone="warning"` to `tone="success"` - green checkmark instead of amber alert-circle, matching what it actually means.
+
+## Round 79: unread-style badge on Slot Assignment for new pending reservations
+
+Requested directly: a red count badge on the Slot Assignment nav item when there's a reservation the attendant hasn't seen yet, that clears the moment they open the page (whether or not they act on anything there), and only reappears for reservations that arrive after that.
+
+- **`desktop/src/components/Sidebar.tsx`**: tracks a `localStorage`-backed "last viewed Slot Assignment at" timestamp (not `usePersistedState`'s `sessionStorage` - this needs to survive closing the browser, otherwise every fresh session would re-flag every still-pending reservation as new). Badge count = pending reservations created after that timestamp, kept live via a realtime subscription to `reservations` (Sidebar is mounted globally in `Layout.tsx`, so this updates regardless of which page the attendant is currently on). Landing on `/slot-assignment` by any route - not just clicking it in the sidebar - immediately marks everything pending as seen; a reservation that arrives after that moment counts as new again.

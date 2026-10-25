@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '@parkwise/shared';
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -14,6 +15,28 @@ import {
   ChevronRight,
   X
 } from 'lucide-react';
+
+// localStorage, not usePersistedState's sessionStorage - this needs to
+// survive closing the browser entirely, otherwise every fresh session would
+// re-flag every still-pending reservation as "new" again.
+const LAST_VIEWED_KEY = 'parkwise:slot-assignment:last-viewed';
+
+function getLastViewed(): string {
+  try {
+    return localStorage.getItem(LAST_VIEWED_KEY) || new Date(0).toISOString();
+  } catch {
+    return new Date(0).toISOString();
+  }
+}
+
+function setLastViewed(iso: string) {
+  try {
+    localStorage.setItem(LAST_VIEWED_KEY, iso);
+  } catch {
+    // Storage full/disabled - the badge just won't persist across a reload,
+    // not worth surfacing to the attendant over.
+  }
+}
 
 interface SidebarProps {
   isOpen: boolean;
@@ -32,8 +55,48 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const { profile, logout } = useAuth();
   const [showLogoutModal, setShowLogoutModal] = React.useState(false);
+  const [newReservationCount, setNewReservationCount] = React.useState(0);
 
   const isAdmin = profile?.role === 'admin';
+
+  // "New" = a pending reservation created since the attendant last actually
+  // opened Slot Assignment - not "still unhandled" (accepting/reassigning
+  // one doesn't need to touch this), just "has this been seen at all".
+  const refreshNewReservationCount = React.useCallback(async () => {
+    if (!supabase) return;
+    const { count } = await supabase
+      .from('reservations')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .gt('created_at', getLastViewed());
+    setNewReservationCount(count ?? 0);
+  }, []);
+
+  React.useEffect(() => {
+    void refreshNewReservationCount();
+
+    if (!supabase) return;
+    const channel = supabase
+      .channel('sidebar-new-reservations')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        void refreshNewReservationCount();
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [refreshNewReservationCount]);
+
+  // Landing on Slot Assignment - by any route, not just clicking it here -
+  // marks everything pending right now as seen, regardless of whether the
+  // attendant actually acts on any of it. A reservation that arrives AFTER
+  // this moment still counts as new again.
+  React.useEffect(() => {
+    if (location.pathname !== '/slot-assignment') return;
+    setLastViewed(new Date().toISOString());
+    setNewReservationCount(0);
+  }, [location.pathname]);
 
   const navItems: NavItem[] = [
     { path: '/', label: 'Live Occupancy', icon: LayoutDashboard, adminOnly: false },
@@ -121,7 +184,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     >
                       <Icon size={20} aria-hidden="true" />
                       <span className="font-medium">{item.label}</span>
-                      {isActive && <ChevronRight size={16} className="ml-auto" aria-hidden="true" />}
+                      <span className="ml-auto flex items-center gap-2">
+                        {item.path === '/slot-assignment' && newReservationCount > 0 && (
+                          <span
+                            className="min-w-[20px] h-5 px-1.5 flex items-center justify-center rounded-full bg-red-600 text-white text-xs font-bold"
+                            aria-label={`${newReservationCount} new reservation${newReservationCount === 1 ? '' : 's'}`}
+                          >
+                            {newReservationCount}
+                          </span>
+                        )}
+                        {isActive && <ChevronRight size={16} aria-hidden="true" />}
+                      </span>
                     </button>
                   </li>
                 );
