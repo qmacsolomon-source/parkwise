@@ -40,6 +40,14 @@ class SlotAgent:
         self.verified_at: Optional[datetime] = None
         self.overstay_timer: Optional[asyncio.Task] = None
         self.grace_timer: Optional[asyncio.Task] = None
+        # How many seconds of grace are left to actually wait through -
+        # decremented by suspend_grace_timer() by however long the timer
+        # had already been running, so a suspend/resume cycle (the camera
+        # moving away for testing and then back) pauses the countdown
+        # instead of either resetting it to a full new window or, before
+        # this existed, never resuming it at all.
+        self._grace_remaining_seconds: Optional[float] = None
+        self._grace_started_at: Optional[datetime] = None
 
         # process_frame() has several await points (Storage upload, DB
         # calls) with shared mutable state (detected_plate, confidence,
@@ -156,50 +164,67 @@ class SlotAgent:
         # after it was armed.
         if self.grace_timer:
             self.grace_timer.cancel()
-        self.grace_timer = asyncio.create_task(self._grace_period_timer())
+        self._grace_remaining_seconds = float(settings.grace_period_seconds)
+        self._grace_started_at = datetime.utcnow()
+        self.grace_timer = asyncio.create_task(self._grace_period_timer(self._grace_remaining_seconds))
     
     async def release_vehicle(self):
         """
         Attendant releases vehicle from slot.
         Resets to IDLE state.
+
+        Takes _frame_lock, same as process_frame() - without it, a frame
+        already mid-flight through _process_frame_locked() (captured
+        before this call, awaiting a Storage upload or DB write) could
+        resume and call _verify_success() AFTER this method had already
+        reset everything to IDLE, re-marking the slot 'occupied' with
+        reservation_id=None - a zombie state nothing else ever clears,
+        since _start_overstay_monitoring() would then also restart with
+        no reservation_id to ever act on. Acquiring the lock here forces
+        whichever of the two actually started first to run to completion
+        before the other begins, so release always ends up being the
+        last word, exactly as the attendant intended.
         """
-        logger.info("Vehicle released", slot_id=self.slot_id)
+        async with self._frame_lock:
+            logger.info("Vehicle released", slot_id=self.slot_id)
 
-        # Cancel overstay timer if running
-        if self.overstay_timer:
-            self.overstay_timer.cancel()
-            self.overstay_timer = None
+            # Cancel overstay timer if running
+            if self.overstay_timer:
+                self.overstay_timer.cancel()
+                self.overstay_timer = None
 
-        # Cancel grace period timer if running
-        if self.grace_timer:
-            self.grace_timer.cancel()
-            self.grace_timer = None
-        
-        # Reset state
-        self.state = AgentState.IDLE
-        self.expected_plate = None
-        self.accepted_at = None
-        self.detected_plate = None
-        self.confidence = 0.0
-        self.retry_count = 0
-        self.reservation_id = None
-        self.verified_at = None
-        
-        # Update database
-        await Database.update_agent_state(self.slot_id, {
-            'state': self.state.value,
-            'expected_plate': None,
-            'accepted_at': None,
-            'detected_plate': None,
-            'confidence': None
-        })
-        
-        # Update slot status
-        await Database.update_slot_status(self.slot_id, 'available', None)
+            # Cancel grace period timer if running
+            if self.grace_timer:
+                self.grace_timer.cancel()
+                self.grace_timer = None
+            self._grace_remaining_seconds = None
+            self._grace_started_at = None
+
+            # Reset state
+            self.state = AgentState.IDLE
+            self.expected_plate = None
+            self.accepted_at = None
+            self.detected_plate = None
+            self.confidence = 0.0
+            self.retry_count = 0
+            self.reservation_id = None
+            self.verified_at = None
+
+            # Update database
+            await Database.update_agent_state(self.slot_id, {
+                'state': self.state.value,
+                'expected_plate': None,
+                'accepted_at': None,
+                'detected_plate': None,
+                'confidence': None
+            })
+
+            # Update slot status
+            await Database.update_slot_status(self.slot_id, 'available', None)
 
     def suspend_grace_timer(self):
         """
-        Cancel the grace-period timer without touching anything else -
+        Pause the grace-period timer without touching anything else -
         used when the one real camera gets pointed at a different slot
         (see AgentManager.set_camera_target()) while this slot is still
         WAITING. Without this, _grace_period_timer() has no way to know
@@ -209,10 +234,40 @@ class SlotAgent:
         verify. Leaves state/expected_plate/etc. exactly as they are
         (still WAITING, stale) - same "frozen, not wrong" treatment as the
         rest of this slot once the camera moves on.
+
+        A genuine PAUSE, not a cancel-and-forget: _grace_remaining_seconds
+        is reduced by however long this run of the timer had actually been
+        watching, so resume_grace_timer() picks up where this left off
+        instead of either granting a fresh full window or - the bug this
+        fixes - never resuming at all and leaving the slot permanently
+        exempt from grace_period_expired for the rest of this WAITING
+        period.
         """
         if self.grace_timer:
             self.grace_timer.cancel()
             self.grace_timer = None
+            if self._grace_started_at and self._grace_remaining_seconds is not None:
+                elapsed = (datetime.utcnow() - self._grace_started_at).total_seconds()
+                self._grace_remaining_seconds = max(0.0, self._grace_remaining_seconds - elapsed)
+            self._grace_started_at = None
+
+    def resume_grace_timer(self):
+        """
+        Restart a grace-period timer suspended by suspend_grace_timer(),
+        for whatever time was left when it was paused - called when the
+        one real camera is pointed back at this slot (see
+        AgentManager.set_camera_target()) while it's still WAITING.
+        No-op if there's no suspended timer to resume (grace_timer already
+        running, or this agent was never WAITING/suspended in the first
+        place).
+        """
+        if self.grace_timer or self.state != AgentState.WAITING:
+            return
+        if self._grace_remaining_seconds is None or self._grace_remaining_seconds <= 0:
+            return
+
+        self._grace_started_at = datetime.utcnow()
+        self.grace_timer = asyncio.create_task(self._grace_period_timer(self._grace_remaining_seconds))
 
     async def process_frame(self, frame_data: bytes):
         """
@@ -279,16 +334,23 @@ class SlotAgent:
         # Recognize plate
         recognizer = get_plate_recognizer()
         detected_plate, confidence = recognizer.recognize(image)
-        
+
         self.detected_plate = detected_plate
         self.confidence = confidence
-        
-        # Update database with detection
-        await Database.update_agent_state(self.slot_id, {
+
+        # Update database with detection. last_frame_url is only included
+        # when the upload actually succeeded - Storage.upload_frame()
+        # returns None on any failure (network blip, a same-second filename
+        # collision, etc), and writing that straight through used to blank
+        # the last genuinely good camera-check photo the customer/attendant
+        # was seeing, for every transient upload failure.
+        state_update = {
             'detected_plate': self.detected_plate,
             'confidence': self.confidence,
-            'last_frame_url': frame_url
-        })
+        }
+        if frame_url:
+            state_update['last_frame_url'] = frame_url
+        await Database.update_agent_state(self.slot_id, state_update)
         
         # Verify if in waiting or verifying state
         if self.state == AgentState.WAITING or self.state == AgentState.VERIFYING:
@@ -325,16 +387,38 @@ class SlotAgent:
                     'state': self.state.value
                 })
 
-    async def confirm_vehicle(self):
+    async def confirm_vehicle(self) -> bool:
         """
         Attendant manually confirms the vehicle from the live photo,
         overriding the OCR/confidence gate in _verify_plate(). Used when the
         camera's last frame looks correct to a human but the detected plate
         either didn't match or wasn't read confidently enough to auto-verify.
+
+        Returns False (no-op) when there's nothing to confirm - an already-
+        released (IDLE) slot, or one with no reservation_id - instead of
+        unconditionally calling _verify_success(), which used to mark the
+        slot 'occupied' with reservation_id=None regardless. WAITING/
+        VERIFYING/ALERT are all valid: ALERT specifically covers overriding
+        a raised mismatch/max-retries alert, which is the whole point of
+        this manual-override path.
+
+        Takes _frame_lock for the same reason release_vehicle() does - so
+        this can't interleave with an in-flight process_frame() call for
+        the same slot.
         """
-        logger.info("Vehicle manually confirmed by attendant", slot_id=self.slot_id,
-                    detected=self.detected_plate, expected=self.expected_plate)
-        await self._verify_success()
+        async with self._frame_lock:
+            if self.state not in (AgentState.WAITING, AgentState.VERIFYING, AgentState.ALERT) \
+                    or self.reservation_id is None:
+                logger.warning(
+                    "Confirm ignored - agent not awaiting verification",
+                    slot_id=self.slot_id, state=self.state.value, reservation_id=self.reservation_id,
+                )
+                return False
+
+            logger.info("Vehicle manually confirmed by attendant", slot_id=self.slot_id,
+                        detected=self.detected_plate, expected=self.expected_plate)
+            await self._verify_success()
+            return True
     
     async def _verify_success(self):
         """Handle successful verification."""
@@ -443,13 +527,18 @@ class SlotAgent:
         
         # Note: Realtime notification will be handled by Supabase triggers
     
-    async def _grace_period_timer(self):
-        """Timer for grace period after acceptance."""
-        logger.info("Grace period timer started", slot_id=self.slot_id, 
-                   seconds=settings.grace_period_seconds)
-        
-        await asyncio.sleep(settings.grace_period_seconds)
-        
+    async def _grace_period_timer(self, seconds: float):
+        """
+        Sleeps for `seconds` then raises grace_period_expired if still
+        WAITING. Takes the duration explicitly (rather than always reading
+        settings.grace_period_seconds) so resume_grace_timer() can restart
+        this for only whatever time was left after a suspend, instead of
+        either a full fresh window or never resuming at all.
+        """
+        logger.info("Grace period timer started", slot_id=self.slot_id, seconds=seconds)
+
+        await asyncio.sleep(seconds)
+
         # Check if still in waiting state
         if self.state == AgentState.WAITING:
             logger.warning("Grace period expired without verification", slot_id=self.slot_id)

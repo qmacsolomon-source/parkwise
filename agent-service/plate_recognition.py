@@ -131,15 +131,26 @@ class PlateRecognizer:
         Normalize plate text.
         - Convert to uppercase
         - Remove spaces
-        - Fix common OCR confusions (O/0, I/1)
+        - Fix common OCR confusions (O/0, I/1, S/5, Z/2, B/8) - ONLY in the
+          digits segment after the 3-letter prefix (mirrors
+          shared/src/plate.ts's normalizePlate(), the same rule the mobile
+          app and the DB's plate format CHECK constraint both enforce).
+
+        Previously these five substitutions ran across the WHOLE string
+        regardless of position, so any real plate whose 3-letter prefix
+        contains O, I, S, Z or B - not rare: ISO1234, ABS5678, OXY1234 -
+        had that prefix corrupted by this function itself before
+        matching.is_match() ever got to compare it against expected_plate.
+        A correctly-parked, correctly-plated vehicle would then
+        systematically fail to auto-verify and could raise a false
+        'mismatch' ALERT once max_retry_attempts was reached.
         """
         if not text:
             return ""
-        
+
         # Convert to uppercase and remove spaces
         normalized = text.upper().replace(" ", "")
-        
-        # Fix common confusions
+
         replacements = {
             'O': '0',  # Letter O to digit 0
             'I': '1',  # Letter I to digit 1
@@ -147,12 +158,13 @@ class PlateRecognizer:
             'Z': '2',  # Letter Z to digit 2
             'B': '8',  # Letter B to digit 8
         }
-        
-        # Only replace if it makes sense (e.g., in positions where digits are expected)
-        # This is a simple heuristic - you may need to adjust based on your plate format
+
+        letters = normalized[:3]
+        digits = normalized[3:]
         for old, new in replacements.items():
-            normalized = normalized.replace(old, new)
-        
+            digits = digits.replace(old, new)
+        normalized = letters + digits
+
         logger.debug("Plate normalized", original=text, normalized=normalized)
         return normalized
     

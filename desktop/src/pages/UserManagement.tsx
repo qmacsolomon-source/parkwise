@@ -325,22 +325,38 @@ export default function UserManagement() {
     setError('');
     
     try {
-      // Get unpaid penalties
+      // Get unpaid penalties - oldest first, so which row ends up "kept"
+      // below is deterministic rather than whatever order the DB happens
+      // to return.
       const { data: penalties } = await supabase
         .from('penalties')
         .select('*')
         .eq('customer_id', selectedProfile.id)
-        .eq('status', 'unpaid');
+        .eq('status', 'unpaid')
+        .order('created_at', { ascending: true });
 
-      // Update penalties
       if (penaltyAmount) {
-        // Adjust amount
+        // Adjust to a new TOTAL balance (what "Current Balance" above and
+        // this field's own label both mean) - NOT a new amount on every
+        // row. There can be several unpaid penalty rows (e.g. an old
+        // no_show plus an overstay); updating all of them to the same
+        // `amount` used to multiply the balance by however many rows
+        // existed instead of setting it. Fold every row but one down to
+        // 'paid' (administratively closed as part of this adjustment, not
+        // separately paid) and put the whole new total on the one that's
+        // left, so the resulting unpaid balance is exactly `amount`.
         const amount = parseFloat(penaltyAmount);
-        await supabase
-          .from('penalties')
-          .update({ amount })
-          .eq('customer_id', selectedProfile.id)
-          .eq('status', 'unpaid');
+        const rows = penalties || [];
+        if (rows.length > 0) {
+          const [keep, ...rest] = rows;
+          if (rest.length > 0) {
+            await supabase
+              .from('penalties')
+              .update({ status: 'paid' })
+              .in('id', rest.map((p) => p.id));
+          }
+          await supabase.from('penalties').update({ amount }).eq('id', keep.id);
+        }
       } else {
         // Waive all
         await supabase
@@ -385,13 +401,26 @@ export default function UserManagement() {
     setError('');
     
     try {
-      // Check if user has history
-      const { count: reservationCount } = await supabase
-        .from('reservations')
-        .select('*', { count: 'exact', head: true })
-        .eq('customer_id', selectedProfile.id);
+      // Check if this account has ANY history worth protecting - not just
+      // reservation history (customers), but payments they personally
+      // processed and audit_log entries they personally generated (staff).
+      // schema.sql has payments.attendant_id and audit_log.actor_id both as
+      // ON DELETE CASCADE from profiles - reservationCount alone is always
+      // 0 for a pure attendant/admin (they're never a customer too), so the
+      // hard-delete branch below used to run unconditionally for staff and
+      // silently destroy every payment record and audit trail they ever
+      // generated, with no warning.
+      const [reservationResult, paymentResult, auditResult] = await Promise.all([
+        supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('customer_id', selectedProfile.id),
+        supabase.from('payments').select('*', { count: 'exact', head: true }).eq('attendant_id', selectedProfile.id),
+        supabase.from('audit_log').select('*', { count: 'exact', head: true }).eq('actor_id', selectedProfile.id),
+      ]);
+      const hasHistory =
+        (reservationResult.count || 0) > 0 ||
+        (paymentResult.count || 0) > 0 ||
+        (auditResult.count || 0) > 0;
 
-      if (reservationCount && reservationCount > 0) {
+      if (hasHistory) {
         // Soft delete - disable account
         await supabase
           .from('profiles')
@@ -405,7 +434,7 @@ export default function UserManagement() {
           action: 'user_soft_deleted',
           details: {
             target_user_id: selectedProfile.id,
-            reason: 'User has reservation history',
+            reason: 'User has reservation, payment, or audit history',
           },
         });
       } else {
@@ -1060,9 +1089,14 @@ export default function UserManagement() {
               <h3 className="text-xl font-bold text-gray-900 mb-2">Delete User</h3>
               <p className="text-gray-600">
                 Are you sure you want to delete {selectedProfile.full_name}?
-                {selectedProfile.reservation_count > 0 && (
+                {selectedProfile.reservation_count > 0 ? (
                   <span className="block mt-2 text-sm text-amber-600">
                     This user has reservation history and will be soft-disabled instead.
+                  </span>
+                ) : (
+                  <span className="block mt-2 text-sm text-amber-600">
+                    If this account has any payment or audit history, it will be
+                    soft-disabled instead of permanently deleted.
                   </span>
                 )}
               </p>

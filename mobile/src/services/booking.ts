@@ -300,6 +300,56 @@ export async function suggestNearbyWindows(
   return suggestions;
 }
 
+export interface OpeningSoonSlot {
+  slotId: string;
+  slotCode: string;
+  floor: number;
+  isPwd: boolean;
+  /** Scheduled end of the current booking - already in the past when overdue. */
+  endsAt: string;
+  /** True when the current booking has already run past endsAt (status
+   * 'overstay') - there is no real ETA at all for these, just "any moment". */
+  overdue: boolean;
+}
+
+/**
+ * Bays that are occupied right now but whose booked time is about to run
+ * out, for the Reserve screen's "Opening soon" list. Never a guarantee - the
+ * car currently parked there can always stay past its booked window, which
+ * is exactly why overdue ones are surfaced separately rather than hidden.
+ * Never throws: this drives an optional hint, not a blocking check.
+ */
+export async function getSlotsEndingSoon(withinMinutes = 60): Promise<OpeningSoonSlot[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc('get_slots_ending_soon', {
+    p_within_minutes: withinMinutes,
+  });
+
+  if (error || !Array.isArray(data)) return [];
+
+  return (data as any[]).map((row) => ({
+    slotId: String(row.slot_id),
+    slotCode: String(row.slot_code),
+    floor: Number(row.floor),
+    isPwd: !!row.is_pwd,
+    endsAt: String(row.ends_at),
+    overdue: !!row.overdue,
+  }));
+}
+
+/** "in 12 min" / "in 1 hr 5 min" / "any moment now" - the countdown shown
+ * next to each row in the "Opening soon" list. */
+export function formatEta(endsAt: string, overdue: boolean, now: number = Date.now()): string {
+  if (overdue) return 'Any moment now';
+  const minutes = Math.round((new Date(endsAt).getTime() - now) / 60_000);
+  if (minutes <= 0) return 'Any moment now';
+  if (minutes < 60) return `in ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `in ${hours} hr ${rest} min` : `in ${hours} hr`;
+}
+
 // --- display helpers -------------------------------------------------------
 
 const DATE_FORMAT: Intl.DateTimeFormatOptions = {

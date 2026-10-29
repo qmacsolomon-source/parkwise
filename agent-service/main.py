@@ -6,7 +6,7 @@ from typing import Optional
 import uvicorn
 from config import settings
 from logger import configure_logger, get_logger
-from agent_manager import get_agent_manager
+from agent_manager import get_agent_manager, UnknownSlotError
 from database import Database
 
 # Configure logging
@@ -114,9 +114,13 @@ async def receive_frame(slot_id: str, file: UploadFile = File(...)):
         
         # Process frame
         await agent_manager.process_frame(slot_id, frame_data)
-        
+
         return JSONResponse(content={"status": "processed", "slot_id": slot_id})
-        
+
+    except UnknownSlotError:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to process frame", slot_id=slot_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -158,6 +162,10 @@ async def receive_frame_raw(slot_ref: str, request: Request):
 
         return JSONResponse(content={"status": "processed", "slot_code": slot['slot_code']})
 
+    except UnknownSlotError:
+        # Only reachable if a camera target set via /camera/target points at
+        # a slot that existed then but has since been deleted.
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {target_slot_id}")
     except HTTPException:
         raise
     except Exception as e:
@@ -235,11 +243,13 @@ async def accept_vehicle(slot_id: str, request: AcceptVehicleRequest):
     """
     try:
         logger.info("Vehicle accept request", slot_id=slot_id, expected_plate=request.expected_plate)
-        
+
         await agent_manager.accept_vehicle(slot_id, request.expected_plate)
-        
+
         return JSONResponse(content={"status": "accepted", "slot_id": slot_id})
-        
+
+    except UnknownSlotError:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_id}")
     except Exception as e:
         logger.error("Failed to accept vehicle", slot_id=slot_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -253,11 +263,13 @@ async def release_vehicle(slot_id: str):
     """
     try:
         logger.info("Vehicle release request", slot_id=slot_id)
-        
+
         await agent_manager.release_vehicle(slot_id)
-        
+
         return JSONResponse(content={"status": "released", "slot_id": slot_id})
-        
+
+    except UnknownSlotError:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_id}")
     except Exception as e:
         logger.error("Failed to release vehicle", slot_id=slot_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -274,10 +286,23 @@ async def confirm_vehicle(slot_id: str):
     try:
         logger.info("Vehicle confirm request", slot_id=slot_id)
 
-        await agent_manager.confirm_vehicle(slot_id)
+        confirmed = await agent_manager.confirm_vehicle(slot_id)
+        if not confirmed:
+            # Not an error (the slot id is real), just nothing to confirm -
+            # already released, or never armed in the first place. 409, not
+            # 200 "confirmed": SlotAgent.confirm_vehicle() returning False
+            # means it deliberately did NOT call _verify_success().
+            raise HTTPException(
+                status_code=409,
+                detail="Nothing to confirm - this slot isn't currently awaiting verification.",
+            )
 
         return JSONResponse(content={"status": "confirmed", "slot_id": slot_id})
 
+    except UnknownSlotError:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_id}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to confirm vehicle", slot_id=slot_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -291,7 +316,9 @@ async def get_agent_state(slot_id: str):
     try:
         state = await agent_manager.get_agent_state(slot_id)
         return JSONResponse(content=state)
-        
+
+    except UnknownSlotError:
+        raise HTTPException(status_code=404, detail=f"Unknown slot: {slot_id}")
     except Exception as e:
         logger.error("Failed to get agent state", slot_id=slot_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

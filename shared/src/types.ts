@@ -82,6 +82,15 @@ export interface Reservation {
   created_at: string;
   cancelled_at: string | null;
   annotation: string | null;
+  /**
+   * The hourly_rate/overstay_per_hour/grace_period_minutes in effect when
+   * this booking was created, captured by assign_slot_for_reservation() so
+   * a later rate change (RatesAndPricing.tsx) can't retroactively change
+   * what an already-booked reservation is charged. Null on rows created
+   * before this column existed - callers should fall back to the live
+   * `rates` row in that case.
+   */
+  rate_snapshot: { hourly_rate: number; overstay_per_hour: number; grace_period_minutes: number } | null;
 }
 
 export interface AgentState {

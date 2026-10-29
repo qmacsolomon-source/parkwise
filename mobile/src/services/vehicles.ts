@@ -43,6 +43,15 @@ export function vehicleErrorMessage(error: unknown): string {
   const details = error as { code?: string; message?: string } | null;
   if (details?.code === '23505') return 'That plate number is already registered.';
   if (details?.code === '23503') return 'That vehicle is still linked to a booking.';
+  // 23514 = check_violation. Postgres re-checks vehicles_plate_format_check
+  // against the WHOLE row on any UPDATE, not just when plate_number itself
+  // changes - a vehicle with a stale, no-longer-valid plate format can trip
+  // this on an otherwise unrelated update (e.g. setDefaultVehicle()'s
+  // owner-wide is_default clear). Without this mapping the raw constraint
+  // name/SQL text surfaced directly to the customer.
+  if (details?.code === '23514') {
+    return 'That plate number is not in a valid format (3 letters followed by 3 or 4 numbers, e.g. ABC1234).';
+  }
   return details?.message || 'Something went wrong. Please try again.';
 }
 
@@ -111,6 +120,19 @@ export async function updateVehicle(
   vehicleId: string,
   updates: { plateNumber?: string; vehicleType?: string }
 ): Promise<Vehicle> {
+  // Only the plate matters here, not vehicle_type: the camera agent's
+  // expected_plate (agent-service's accept_vehicle()) and an attendant's own
+  // eyes both compare against whatever plate was on the vehicle at accept
+  // time. deleteVehicle() already refuses to touch a vehicle with an active
+  // reservation (hasActiveReservation() below) - editing its plate out from
+  // under an in-progress verification is the same risk and had no guard at
+  // all.
+  if (updates.plateNumber !== undefined && (await hasActiveReservation(vehicleId))) {
+    throw new Error(
+      'This vehicle has an active reservation. Cancel or complete the booking before changing its plate number.'
+    );
+  }
+
   const patch: Record<string, string> = {};
   if (updates.plateNumber !== undefined) patch.plate_number = normalizePlate(updates.plateNumber);
   if (updates.vehicleType !== undefined) patch.vehicle_type = updates.vehicleType;

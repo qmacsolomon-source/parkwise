@@ -126,29 +126,37 @@ export default function Reports() {
 
       // Count reservation statuses
       let noShows = 0;
-      let overstays = 0;
       if (reservations) {
         reservations.forEach((r: any) => {
           if (r.status === 'no_show') noShows++;
-          if (r.status === 'overstay') overstays++;
         });
       }
 
-      // Calculate penalties, and derive "late cancellations" from the
-      // late_cancel penalty type rather than every cancellation -
-      // business_rules.sql's trigger only creates one of those when the
-      // cancellation actually happened inside late_cancel_window_minutes
-      // of the start time; counting raw status === 'cancelled' instead
-      // inflated this stat with every ordinary, well-ahead-of-time
-      // cancellation too.
+      // Calculate penalties, and derive "late cancellations" AND "overstays"
+      // from their penalty type rather than the reservation's CURRENT
+      // status - business_rules.sql's trigger only creates a late_cancel
+      // penalty when the cancellation actually happened inside
+      // late_cancel_window_minutes, so counting raw status === 'cancelled'
+      // would inflate that stat with every ordinary, well-ahead-of-time
+      // cancellation. Overstays have the same problem in the other
+      // direction: once CashPayment.tsx collects payment, the reservation's
+      // status flips to 'completed', so a plain status === 'overstay' count
+      // silently drops any overstay that got paid before the report ran -
+      // which, on any report not generated mid-overstay, is most of them.
+      // The overstay penalty row (23_fix_overstay_double_charge.sql - always
+      // created when status first flips to 'overstay', amount aside)
+      // persists regardless of what happens to the reservation afterward,
+      // so it's the actual record of "this stay ran long."
       let penaltiesIssued = 0;
       let penaltiesCollected = 0;
       let lateCancellations = 0;
+      let overstays = 0;
       if (penalties) {
         penalties.forEach((p: any) => {
           penaltiesIssued += p.amount;
           if (p.status === 'paid') penaltiesCollected += p.amount;
           if (p.type === 'late_cancel') lateCancellations++;
+          if (p.type === 'overstay') overstays++;
         });
       }
 

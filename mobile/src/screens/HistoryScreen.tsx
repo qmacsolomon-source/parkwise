@@ -77,6 +77,10 @@ export default function HistoryScreen() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [penalties, setPenalties] = useState<Penalty[]>([]);
+  /** reservations only store slot_id - resolved once per load, same pattern
+   * DashboardScreen/TimerScreen already use, so History shows a readable
+   * code instead of a raw UUID. */
+  const [slotCodes, setSlotCodes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -100,16 +104,25 @@ export default function HistoryScreen() {
       // payments has no customer_id of its own - only reservation_id - so it
       // can only be filtered to this customer's own payments once their
       // reservation ids are known.
+      // 'overstay' deliberately excluded - it means the vehicle is still
+      // physically parked, awaiting payment (CashPayment.tsx explicitly
+      // queries it alongside 'verified' as "not yet paid"), not a finished
+      // booking. Including it here meant the SAME reservation showed up
+      // simultaneously in "Your booking" on Home/Timer AND in History as
+      // if it were already settled.
       const reservationsData = await supabase
         .from('reservations')
         .select('*')
         .eq('customer_id', profile.id)
-        .in('status', ['completed', 'cancelled', 'no_show', 'overstay'])
+        .in('status', ['completed', 'cancelled', 'no_show'])
         .order('created_at', { ascending: false });
 
       const reservationIds = (reservationsData.data ?? []).map((reservation) => reservation.id);
+      const slotIds = Array.from(
+        new Set((reservationsData.data ?? []).map((reservation) => reservation.slot_id))
+      );
 
-      const [paymentsData, penaltiesData] = await Promise.all([
+      const [paymentsData, penaltiesData, slotsData] = await Promise.all([
         reservationIds.length
           ? supabase
               .from('payments')
@@ -122,11 +135,21 @@ export default function HistoryScreen() {
           .select('*')
           .eq('customer_id', profile.id)
           .order('created_at', { ascending: false }),
+        slotIds.length
+          ? supabase.from('slots').select('id, slot_code').in('id', slotIds)
+          : Promise.resolve({ data: [] as { id: string; slot_code: string }[], error: null }),
       ]);
 
       if (reservationsData.data) setReservations(reservationsData.data);
       if (paymentsData.data) setPayments(paymentsData.data);
       if (penaltiesData.data) setPenalties(penaltiesData.data);
+      if (slotsData.data) {
+        const codes: Record<string, string> = {};
+        for (const slot of slotsData.data as { id: string; slot_code: string }[]) {
+          codes[slot.id] = slot.slot_code;
+        }
+        setSlotCodes(codes);
+      }
     } catch (error) {
       console.error('Error loading history:', error);
     } finally {
@@ -195,6 +218,7 @@ export default function HistoryScreen() {
             reservations.map((reservation) => {
               const expanded = expandedId === reservation.id;
               const payment = payments.find((item) => item.reservation_id === reservation.id);
+              const slotLabel = slotCodes[reservation.slot_id] ?? reservation.slot_id;
               const windowLabel = `${formatTime(reservation.start_time)} – ${formatTime(
                 reservation.end_time
               )}`;
@@ -226,7 +250,7 @@ export default function HistoryScreen() {
                     style={styles.slotRow}
                     accessible
                     accessibilityRole="text"
-                    accessibilityLabel={`Slot: ${reservation.slot_id}`}
+                    accessibilityLabel={`Slot: ${slotLabel}`}
                   >
                     <Ionicons name="car-outline" size={18} color={colors.textMuted} />
                     <Text style={[typeToken('body', textScale), { color: colors.textMuted }]}>
@@ -241,7 +265,7 @@ export default function HistoryScreen() {
                       numberOfLines={1}
                       ellipsizeMode="middle"
                     >
-                      {reservation.slot_id}
+                      {slotLabel}
                     </Text>
                   </View>
 

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, {
-  DateTimePickerEvent,
+  DateTimePickerChangeEvent,
 } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -26,6 +26,7 @@ import {
   AssignSlotResult,
   BookingLimits,
   DEFAULT_BOOKING_LIMITS,
+  OpeningSoonSlot,
   WindowSuggestion,
   assignSlotForReservation,
   changeReservationSlot,
@@ -34,10 +35,12 @@ import {
   fetchLatestRate,
   formatAdvanceLimit,
   formatDate,
+  formatEta,
   formatTime,
   formatWindow,
   formatDuration,
   getBookingLimits,
+  getSlotsEndingSoon,
   hoursBetween,
   suggestNearbyWindows,
   toBookingError,
@@ -115,6 +118,14 @@ export default function ReservationScreen() {
 
   const [bookingLimits, setBookingLimits] = useState<BookingLimits>(DEFAULT_BOOKING_LIMITS);
 
+  // "Opening soon" - occupied bays whose booked window is about to run out,
+  // shown so a customer can decide to wait instead of booking far ahead.
+  // Polled rather than subscribed: get_slots_ending_soon() is SECURITY
+  // DEFINER and reads every customer's reservations, which Realtime's own
+  // RLS enforcement on postgres_changes would never deliver to this client.
+  const [openingSoon, setOpeningSoon] = useState<OpeningSoonSlot[]>([]);
+  const [etaTick, setEtaTick] = useState(() => Date.now());
+
   const startISO = start.toISOString();
   const endISO = end.toISOString();
 
@@ -158,6 +169,31 @@ export default function ReservationScreen() {
   // customer's activity, not just a refetch of this one's own reservations.
   useEffect(() => {
     void getBookingLimits().then(setBookingLimits);
+  }, []);
+
+  // Refetched every minute rather than once: the whole point of this list is
+  // bays whose ETA is close, so it goes stale fast on its own.
+  useEffect(() => {
+    let active = true;
+    const load = () => {
+      void getSlotsEndingSoon(60).then((rows) => {
+        if (active) setOpeningSoon(rows);
+      });
+    };
+    load();
+    const interval = setInterval(load, 60_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Separate, more frequent tick just for the "in N min" countdown text -
+  // cheap (no network), so it doesn't need to wait for the minute-interval
+  // refetch above to feel live.
+  useEffect(() => {
+    const timer = setInterval(() => setEtaTick(Date.now()), 15_000);
+    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -233,10 +269,18 @@ export default function ReservationScreen() {
     [end]
   );
 
-  const onPickerChange = (event: DateTimePickerEvent, value?: Date) => {
+  // onValueChange/onDismiss, not the deprecated single onChange - the
+  // library now warns on every mount that still passes onChange at all
+  // (@react-native-community/datetimepicker's warnIfOnChangeIsUsed()),
+  // regardless of whether anything useful came of it. onValueChange only
+  // fires on an actual pick (value is never undefined, unlike onChange's
+  // optional `date?`), so the dismissed-with-no-value case onPickerChange
+  // used to filter out here never reaches this handler at all - it's
+  // handled by onPickerDismiss below instead.
+  const onPickerValueChange = (_event: DateTimePickerChangeEvent, value: Date) => {
     const active = picker;
     setPicker(null);
-    if (!active || event.type === 'dismissed' || !value) return;
+    if (!active) return;
 
     const base = active.field === 'start' ? start : end;
     const next = new Date(base);
@@ -248,6 +292,38 @@ export default function ReservationScreen() {
     }
 
     applyToField(active.field, next);
+  };
+
+  const onPickerDismiss = () => setPicker(null);
+
+  // @react-native-community/datetimepicker has no real web implementation -
+  // it renders nothing in Metro's web target, which is why the laptop/browser
+  // test flow couldn't edit the date/time at all. Standard HTML <input>
+  // elements stand in for it on web only; native platforms are untouched.
+  const onWebInputChange = (field: 'start' | 'end', mode: 'date' | 'time', raw: string) => {
+    if (!raw) return;
+    const base = field === 'start' ? start : end;
+    const next = new Date(base);
+
+    if (mode === 'date') {
+      const [year, month, day] = raw.split('-').map(Number);
+      next.setFullYear(year, month - 1, day);
+    } else {
+      const [hours, minutes] = raw.split(':').map(Number);
+      next.setHours(hours, minutes, 0, 0);
+    }
+
+    applyToField(field, next);
+  };
+
+  const toWebDateValue = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  };
+
+  const toWebTimeValue = (date: Date) => {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
   };
 
   // --- the booking itself -------------------------------------------------
@@ -284,6 +360,22 @@ export default function ReservationScreen() {
           .catch(() => undefined);
       }
     }
+  };
+
+  // Sets the start time to around when this bay is expected to clear, not a
+  // promise of THIS bay - assign_slot_for_reservation() still picks whatever
+  // is actually free at that time, which the footnote next to the list says
+  // plainly so tapping never reads as "book this one".
+  const applyOpeningSoon = (slot: OpeningSoonSlot) => {
+    const base = slot.overdue ? new Date() : new Date(slot.endsAt);
+    const next = new Date(Math.max(base.getTime(), Date.now()));
+    next.setSeconds(0, 0);
+    next.setMinutes(Math.ceil(next.getMinutes() / 5) * 5);
+
+    setStart(next);
+    setEnd(defaultEnd(next));
+    setFormError(null);
+    showToast(`Start time set to around when slot ${slot.slotCode} clears.`, 'info');
   };
 
   const applySuggestion = (suggestion: WindowSuggestion) => {
@@ -507,6 +599,61 @@ export default function ReservationScreen() {
         </Text>
       ) : null}
 
+      {openingSoon.length > 0 ? (
+        <View style={styles.block}>
+          <SectionHeader title="Opening soon" />
+          <Card style={styles.cardTight}>
+            {openingSoon.map((slot) => {
+              const eta = formatEta(slot.endsAt, slot.overdue, etaTick);
+              // The server's own `overdue` only refreshes on the 60s poll;
+              // this re-derives it from the 15s tick too so a slot that
+              // crosses its end_time mid-poll doesn't show "Any moment now"
+              // in the chip while the icon/subtitle below it still read as
+              // scheduled for another 0-45 seconds.
+              const overdue = slot.overdue || new Date(slot.endsAt).getTime() <= etaTick;
+              return (
+                <Pressable
+                  key={slot.slotId}
+                  onPress={() => applyOpeningSoon(slot)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Slot ${slot.slotCode}, floor ${slot.floor}, ${
+                    overdue ? 'already running past its booked time' : `expected to clear ${eta}`
+                  }. Sets your start time to try then.`}
+                  style={({ pressed }) => [
+                    styles.option,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: pressed ? colors.surfaceAlt : 'transparent',
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={overdue ? 'time' : 'time-outline'}
+                    size={20}
+                    color={overdue ? colors.warning : colors.tealDark}
+                  />
+                  <View style={styles.flexText}>
+                    <Text style={[typeToken('bodyStrong', textScale), { color: colors.text }]}>
+                      Slot {slot.slotCode} · Floor {slot.floor}
+                    </Text>
+                    <Text style={[typeToken('small', textScale), { color: colors.textMuted }]}>
+                      {slot.isPwd ? 'PWD bay · ' : ''}
+                      {overdue ? 'Running past its booked time' : 'Booked until then'}
+                    </Text>
+                  </View>
+                  <StatusChip label={eta} tone={overdue ? 'warning' : 'info'} icon={null} />
+                </Pressable>
+              );
+            })}
+          </Card>
+          <Text style={[typeToken('small', textScale), styles.footnote, { color: colors.textMuted }]}>
+            Estimates only, not a guarantee - the vehicle parked there can stay past its booked
+            time. Tapping a bay sets your start time to around when it clears; the lot still
+            assigns whichever bay is actually free then, not necessarily this one.
+          </Text>
+        </View>
+      ) : null}
+
       {/* 1. vehicle */}
       <SectionHeader title="Vehicle" />
       {vehiclesLoading ? (
@@ -583,7 +730,30 @@ export default function ReservationScreen() {
         </Card>
       </View>
 
-      {picker ? (
+      {picker && Platform.OS === 'web'
+        ? React.createElement('input', {
+            type: picker.mode === 'date' ? 'date' : 'time',
+            autoFocus: true,
+            value:
+              picker.mode === 'date'
+                ? toWebDateValue(picker.field === 'start' ? start : end)
+                : toWebTimeValue(picker.field === 'start' ? start : end),
+            min: picker.mode === 'date' && picker.field === 'end' ? toWebDateValue(start) : undefined,
+            onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+              onWebInputChange(picker.field, picker.mode, e.target.value),
+            onBlur: () => setPicker(null),
+            style: {
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 1000,
+              fontSize: 16,
+              padding: 8,
+            },
+          })
+        : null}
+      {picker && Platform.OS !== 'web' ? (
         <DateTimePicker
           value={picker.field === 'start' ? start : end}
           mode={picker.mode}
@@ -591,7 +761,8 @@ export default function ReservationScreen() {
           maximumDate={
             picker.field === 'start' ? new Date(Date.now() + effectiveAdvanceHours * 3_600_000) : undefined
           }
-          onChange={onPickerChange}
+          onValueChange={onPickerValueChange}
+          onDismiss={onPickerDismiss}
         />
       ) : null}
 

@@ -101,12 +101,18 @@ export default function CashPayment() {
       }
 
       if (penaltiesData.data) {
+        // Keyed by reservation_id, not customer_id - penalties already carry
+        // their own reservation_id (schema.sql: NOT NULL), so a customer's
+        // unrelated unpaid penalty from a DIFFERENT booking (e.g. an old
+        // no_show) must never get bundled into or cleared by THIS payment.
+        // calculate_payment() in business_rules.sql already scopes by
+        // reservation_id; this was the one place that didn't match it.
         const penaltiesMap: Record<string, Penalty[]> = {};
         penaltiesData.data.forEach(penalty => {
-          if (!penaltiesMap[penalty.customer_id]) {
-            penaltiesMap[penalty.customer_id] = [];
+          if (!penaltiesMap[penalty.reservation_id]) {
+            penaltiesMap[penalty.reservation_id] = [];
           }
-          penaltiesMap[penalty.customer_id].push(penalty);
+          penaltiesMap[penalty.reservation_id].push(penalty);
         });
         setPenalties(penaltiesMap);
       }
@@ -123,10 +129,24 @@ export default function CashPayment() {
       throw new Error('Rates not loaded');
     }
 
+    // Bill using the rate that was actually in effect when this reservation
+    // was CREATED (assign_slot_for_reservation() snapshots it), not
+    // whatever's live on the rates table right now. Without this, the
+    // on-screen promise on RatesAndPricing.tsx ("existing reservations will
+    // continue to use the rates in effect at booking time") was simply
+    // false - every payment used the current live rate regardless of when
+    // the booking was made. Falls back to the live rate only for rows
+    // created before this column existed (rate_snapshot is null).
+    const effectiveRate = reservation.rate_snapshot ?? {
+      hourly_rate: rates.hourly_rate,
+      overstay_per_hour: rates.overstay_per_hour,
+      grace_period_minutes: rates.grace_period_minutes,
+    };
+
     const startTime = new Date(reservation.start_time);
     const endTime = new Date(reservation.end_time);
     const now = new Date();
-    
+
     // Calculate reserved hours - rounded UP to the whole hour, same rule
     // every other part of this system bills by (mobile's booking
     // estimate, assign_slot_for_reservation()'s CEIL(v_hours), and
@@ -135,7 +155,7 @@ export default function CashPayment() {
     // was quoted at booking time - a 1.5-hour booking at ₱50/hr quoted
     // ₱100 but charged ₱75 here.
     const reservedHours = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
-    const baseCharge = Math.max(0, Math.ceil(reservedHours) * rates.hourly_rate);
+    const baseCharge = Math.max(0, Math.ceil(reservedHours) * effectiveRate.hourly_rate);
 
     // Calculate overstay - gated by the grace period, same rule
     // calculate_payment() documents and RatesAndPricing.tsx's own preview
@@ -146,17 +166,17 @@ export default function CashPayment() {
     let overstayHours = 0;
     let overstaySurcharge = 0;
 
-    const graceEnd = new Date(endTime.getTime() + rates.grace_period_minutes * 60 * 1000);
+    const graceEnd = new Date(endTime.getTime() + effectiveRate.grace_period_minutes * 60 * 1000);
     if (now > graceEnd) {
       overstayHours = (now.getTime() - endTime.getTime()) / (1000 * 60 * 60);
       // Round up to nearest hour for overstay
       const roundedOverstayHours = Math.ceil(overstayHours);
-      overstaySurcharge = roundedOverstayHours * rates.overstay_per_hour;
+      overstaySurcharge = roundedOverstayHours * effectiveRate.overstay_per_hour;
     }
 
-    // Calculate penalties
-    const customerPenalties = penalties[reservation.customer_id] || [];
-    const penaltyTotal = customerPenalties.reduce((sum, p) => sum + p.amount, 0);
+    // Calculate penalties - this reservation's own only, see loadData()'s comment.
+    const reservationPenalties = penalties[reservation.id] || [];
+    const penaltyTotal = reservationPenalties.reduce((sum, p) => sum + p.amount, 0);
 
     const total = baseCharge + overstaySurcharge + penaltyTotal;
 
@@ -268,9 +288,12 @@ export default function CashPayment() {
 
       if (paymentError) throw paymentError;
 
-      // Mark penalties as paid
-      const customerPenalties = penalties[selectedReservation.customer_id] || [];
-      for (const penalty of customerPenalties) {
+      // Mark penalties as paid - this reservation's own only, same reasoning
+      // as calculatePayment() above. Marking a DIFFERENT reservation's unpaid
+      // penalty 'paid' here would clear a debt this payment never actually
+      // collected.
+      const reservationPenalties = penalties[selectedReservation.id] || [];
+      for (const penalty of reservationPenalties) {
         await supabase.from('penalties').update({ status: 'paid' }).eq('id', penalty.id);
       }
 
@@ -391,7 +414,10 @@ export default function CashPayment() {
     // doesn't include the peso sign, so it would render as a blank/missing
     // glyph in the actual PDF. The on-screen JSX versions below use the
     // real ₱ symbol fine, since that's just normal browser text rendering.
-    doc.text(`Base Charge (PHP ${rates?.hourly_rate.toFixed(2)}/hr)`, 20, 160);
+    // The rate this reservation was actually billed at (its own snapshot,
+    // same as calculatePayment() uses) - not necessarily today's live rate.
+    const receiptHourlyRate = reservation.rate_snapshot?.hourly_rate ?? rates?.hourly_rate;
+    doc.text(`Base Charge (PHP ${receiptHourlyRate?.toFixed(2)}/hr)`, 20, 160);
     doc.text(`PHP ${calc.baseCharge.toFixed(2)}`, 170, 160, { align: 'right' });
 
     if (calc.overstaySurcharge > 0) {

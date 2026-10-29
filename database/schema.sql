@@ -122,6 +122,13 @@ CREATE TABLE IF NOT EXISTS reservations (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   cancelled_at TIMESTAMP WITH TIME ZONE,
   annotation TEXT,
+  -- hourly_rate/overstay_per_hour/grace_period_minutes in effect when this
+  -- booking was created (assign_slot_for_reservation() fills this in) - so
+  -- a later change to `rates` can't retroactively change what an
+  -- already-booked reservation is charged. Null for rows created before
+  -- this column existed; CashPayment.tsx falls back to the live `rates`
+  -- row for those.
+  rate_snapshot JSONB,
   CONSTRAINT no_overlapping_reservations EXCLUDE USING GIST (
     slot_id WITH =,
     tstzrange(start_time, end_time) WITH &&
@@ -132,6 +139,7 @@ CREATE TABLE IF NOT EXISTS reservations (
 -- (table already existed for anyone who ran the old schema.sql), so add it
 -- explicitly for upgrades.
 ALTER TABLE reservations ADD COLUMN IF NOT EXISTS annotation TEXT;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS rate_snapshot JSONB;
 
 -- Upgrade path for a database created with the old hard-FK profiles.id:
 -- drop the auth.users requirement and give id a default so walk-in profiles

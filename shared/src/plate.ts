@@ -5,7 +5,9 @@
 // called normalizePlate, the other a bare toUpperCase), which left the same
 // car stored as two different strings depending on which path created it.
 
-/** A Philippine four-wheeled plate: 3 letters + 3 or 4 digits. */
+/**
+ * A Philippine four-wheeled plate: 3 letters + 3 or 4 digits (e.g. ABC1234).
+ */
 export const PLATE_PATTERN = /^[A-Z]{3}\d{3,4}$/;
 
 /**
@@ -26,9 +28,7 @@ const DIGIT_CONFUSIONS: Record<string, string> = {
 export function normalizePlate(raw: string | null | undefined): string {
   const cleaned = (raw ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const letters = cleaned.slice(0, 3);
-  const digits = cleaned
-    .slice(3)
-    .replace(/[OISZB]/g, (char) => DIGIT_CONFUSIONS[char] ?? char);
+  const digits = cleaned.slice(3).replace(/[OISZB]/g, (char) => DIGIT_CONFUSIONS[char] ?? char);
   return `${letters}${digits}`;
 }
 
@@ -37,7 +37,7 @@ export function plateError(raw: string | null | undefined): string | null {
   const normalized = normalizePlate(raw);
   if (!normalized) return 'Enter the plate number.';
   if (!PLATE_PATTERN.test(normalized)) {
-    return 'Use 3 letters + 3 or 4 numbers (e.g. ABC123 or ABC1234).';
+    return 'Use 3 letters followed by 3 or 4 numbers (e.g. ABC1234).';
   }
   return null;
 }

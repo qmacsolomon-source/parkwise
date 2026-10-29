@@ -75,7 +75,7 @@ DECLARE
   v_attempt INTEGER := 0;
   v_slot    RECORD;
   v_res     reservations;
-  v_rate    NUMERIC;
+  v_rate    RECORD;
   v_hours   NUMERIC;
   v_pwd_max_hours     NUMERIC;
   v_regular_max_hours NUMERIC;
@@ -126,6 +126,16 @@ BEGIN
     RAISE EXCEPTION 'BOOKING_TOO_FAR_AHEAD';
   END IF;
 
+  -- Captured now, before the slot is even picked, and stored on the
+  -- reservation itself (rate_snapshot below) so a later rate change
+  -- (RatesAndPricing.tsx) can never retroactively change what THIS booking
+  -- is billed - CashPayment.tsx uses this snapshot instead of the live
+  -- `rates` row. Previously nothing captured this at all, so the on-screen
+  -- promise that "existing reservations keep the rate in effect at booking
+  -- time" was simply false - every payment used whatever rate was live at
+  -- checkout, regardless of when the booking was made.
+  SELECT * INTO v_rate FROM rates ORDER BY updated_at DESC LIMIT 1;
+
   LOOP
     v_attempt := v_attempt + 1;
 
@@ -152,8 +162,15 @@ BEGIN
     EXIT WHEN v_slot.id IS NULL;
 
     BEGIN
-      INSERT INTO reservations (customer_id, vehicle_id, slot_id, start_time, end_time, status)
-      VALUES (v_uid, p_vehicle_id, v_slot.id, p_start, p_end, 'pending')
+      INSERT INTO reservations (customer_id, vehicle_id, slot_id, start_time, end_time, status, rate_snapshot)
+      VALUES (
+        v_uid, p_vehicle_id, v_slot.id, p_start, p_end, 'pending',
+        jsonb_build_object(
+          'hourly_rate', v_rate.hourly_rate,
+          'overstay_per_hour', v_rate.overstay_per_hour,
+          'grace_period_minutes', v_rate.grace_period_minutes
+        )
+      )
       RETURNING * INTO v_res;
 
       EXIT;  -- inserted successfully
@@ -193,7 +210,6 @@ BEGIN
     )
   );
 
-  SELECT hourly_rate INTO v_rate FROM rates ORDER BY updated_at DESC LIMIT 1;
   v_hours := EXTRACT(EPOCH FROM (p_end - p_start)) / 3600;
 
   RETURN jsonb_build_object(
@@ -204,7 +220,7 @@ BEGIN
     'floor', v_slot.floor,
     'start_time', p_start,
     'end_time', p_end,
-    'estimated_charge', CEIL(v_hours) * COALESCE(v_rate, 0)
+    'estimated_charge', CEIL(v_hours) * COALESCE(v_rate.hourly_rate, 0)
   );
 END;
 $$;

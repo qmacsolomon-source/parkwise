@@ -7,6 +7,19 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 
+class UnknownSlotError(Exception):
+    """Raised by get_agent() when slot_id doesn't match any real slot row.
+
+    Lets main.py return 404 instead of either a confusing 500 or - the
+    actual previous bug - silently fabricating a fresh, never-initialized
+    agent and letting the caller write through it as if it were real.
+    """
+
+    def __init__(self, slot_id: str):
+        super().__init__(f"Unknown slot: {slot_id}")
+        self.slot_id = slot_id
+
+
 class AgentManager:
     """
     Manages all slot agents as concurrent asyncio tasks.
@@ -55,6 +68,15 @@ class AgentManager:
             if isinstance(previous_agent, SlotAgent) and previous_agent.state == AgentState.WAITING:
                 previous_agent.suspend_grace_timer()
 
+        # The flip side of the above: if THIS target was itself suspended by
+        # an earlier retarget-away (camera pointed somewhere else, then back
+        # to this slot, with no accept/release in between), its grace timer
+        # is still paused with no way to resume on its own -
+        # resume_grace_timer() is a no-op unless that's actually the case.
+        new_agent = self.agents.get(slot_id)
+        if isinstance(new_agent, SlotAgent) and new_agent.state == AgentState.WAITING:
+            new_agent.resume_grace_timer()
+
         self.camera_target_slot_id = slot_id
 
     def resolve_camera_target(self, default_slot_id: str) -> str:
@@ -90,47 +112,59 @@ class AgentManager:
         logger.info("Stopping AgentManager")
         self.running = False
     
-    def get_agent(self, slot_id: str) -> SlotAgent:
-        """Get agent by slot ID."""
-        if slot_id not in self.agents:
-            # Create new agent if not exists
-            agent = SlotAgent(slot_id)
-            self.agents[slot_id] = agent
-            logger.info("New agent created", slot_id=slot_id)
-            return agent
-        
-        # Return existing agent (need to store actual agent instances, not IDs)
-        # Fix: store agent instances
-        if isinstance(self.agents[slot_id], str):
-            agent = SlotAgent(slot_id)
-            self.agents[slot_id] = agent
-            return agent
-        
-        return self.agents[slot_id]
-    
+    async def get_agent(self, slot_id: str) -> SlotAgent:
+        """
+        Get the agent for slot_id, creating and initializing one from the
+        database if this is the first time this process has seen it.
+
+        Used to synchronously fabricate a brand-new SlotAgent for ANY
+        slot_id - including one that was never a real row in `slots` at
+        all (a typo, or a stale id from before a slot was deleted) - with
+        no call to initialize(), unlike the real startup path in
+        initialize() below. Two concrete failures followed: GET
+        .../state on a bad id returned a fake "idle" agent instead of a
+        404, and a slot added to `slots` without restarting this process
+        had its first real write (e.g. accept_vehicle) go through an
+        agent that never loaded the slot's actual agent_states row,
+        overwriting whatever was really there with defaults.
+        """
+        existing = self.agents.get(slot_id)
+        if isinstance(existing, SlotAgent):
+            return existing
+
+        slot = await Database.get_slot(slot_id)
+        if not slot:
+            raise UnknownSlotError(slot_id)
+
+        agent = SlotAgent(slot_id)
+        await agent.initialize()
+        self.agents[slot_id] = agent
+        logger.info("New agent created", slot_id=slot_id)
+        return agent
+
     async def process_frame(self, slot_id: str, frame_data: bytes):
         """Process frame for specific slot."""
-        agent = self.get_agent(slot_id)
+        agent = await self.get_agent(slot_id)
         await agent.process_frame(frame_data)
-    
+
     async def accept_vehicle(self, slot_id: str, expected_plate: str):
         """Accept vehicle for specific slot."""
-        agent = self.get_agent(slot_id)
+        agent = await self.get_agent(slot_id)
         await agent.accept_vehicle(expected_plate)
-    
+
     async def release_vehicle(self, slot_id: str):
         """Release vehicle from specific slot."""
-        agent = self.get_agent(slot_id)
+        agent = await self.get_agent(slot_id)
         await agent.release_vehicle()
 
-    async def confirm_vehicle(self, slot_id: str):
+    async def confirm_vehicle(self, slot_id: str) -> bool:
         """Attendant manually confirms vehicle for specific slot."""
-        agent = self.get_agent(slot_id)
-        await agent.confirm_vehicle()
-    
+        agent = await self.get_agent(slot_id)
+        return await agent.confirm_vehicle()
+
     async def get_agent_state(self, slot_id: str) -> dict:
         """Get state of specific agent."""
-        agent = self.get_agent(slot_id)
+        agent = await self.get_agent(slot_id)
         return agent.get_state_dict()
     
     def get_all_states(self) -> Dict[str, dict]:

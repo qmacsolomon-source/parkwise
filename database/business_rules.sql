@@ -60,13 +60,31 @@ BEGIN
     WHERE id = NEW.slot_id;
     RETURN NEW;
   ELSIF TG_OP = 'UPDATE' THEN
+    -- The reservation moved to a DIFFERENT slot (mobile's "Change slot" /
+    -- change_reservation_slot(), or Slot Assignment's Reassign) - free the
+    -- OLD slot first, unconditionally, regardless of what NEW.status ends
+    -- up being below. Previously nothing here ever looked at OLD.slot_id at
+    -- all, so the slot a reservation moved AWAY FROM kept showing
+    -- 'reserved'/'occupied' forever on the attendant side. Combined with
+    -- 'pending' having no branch at all below (now fixed), reassigning a
+    -- reservation that was still 'pending' - the normal case right after
+    -- booking, before an attendant ever touches it - used to update
+    -- NEITHER slot's row: the new slot kept showing 'available' and the
+    -- old one kept showing taken, with nothing on Live Occupancy or Slot
+    -- Assignment ever reflecting the move.
+    IF OLD.slot_id IS DISTINCT FROM NEW.slot_id THEN
+      UPDATE slots SET status = 'available', current_reservation_id = NULL
+      WHERE id = OLD.slot_id;
+    END IF;
+
     -- Update slot status based on reservation status
-    IF NEW.status = 'active' THEN
-      -- Administratively checked in (Slot Assignment's Accept Vehicle), not
-      -- yet camera-verified. Keep the slot 'reserved', not 'occupied' -
+    IF NEW.status = 'pending' OR NEW.status = 'active' THEN
+      -- 'pending': booked, not yet administratively accepted. 'active':
+      -- administratively checked in (Slot Assignment's Accept Vehicle), not
+      -- yet camera-verified. Both keep the slot 'reserved', not 'occupied' -
       -- 'occupied' is reserved to mean "the camera confirmed the plate,"
       -- which only happens once status reaches 'verified' below, not just
-      -- because an attendant clicked accept.
+      -- because a booking exists or an attendant clicked accept.
       UPDATE slots SET status = 'reserved', current_reservation_id = NEW.id
       WHERE id = NEW.slot_id;
     ELSIF NEW.status = 'verified' THEN
@@ -341,14 +359,18 @@ BEGIN
       IF NOT EXISTS (
         SELECT 1 FROM penalties WHERE reservation_id = NEW.id AND type = 'overstay'
       ) THEN
-        -- Flat, one-time charge for symmetry with no_show/late_cancel below.
-        -- This is a SEPARATE line item from the metered, per-hour
-        -- overstay_surcharge computed in calculate_payment(); rates has no
-        -- dedicated flat "overstay_penalty" column, so overstay_per_hour is
-        -- reused here as that flat amount. See report for the ambiguity this
-        -- creates (possible double charge against the same overstay event).
+        -- amount = 0, deliberately: the REAL overstay charge is the metered,
+        -- per-hour overstay_surcharge computed fresh at payment time
+        -- (calculate_payment() below, mirrored in CashPayment.tsx), which
+        -- already covers the full overstayed duration starting from hour
+        -- one. Charging rate.overstay_per_hour AGAIN here double-billed
+        -- every single overstay by one extra hour - confirmed, not just
+        -- "possible" as this comment used to hedge. This row still exists
+        -- (at 0) so has_unpaid_penalties() keeps blocking new bookings for a
+        -- customer with an unresolved overstay, and so the row is still
+        -- there for CashPayment.tsx to mark 'paid' alongside the real charge.
         INSERT INTO penalties (customer_id, reservation_id, type, amount)
-        VALUES (NEW.customer_id, NEW.id, 'overstay', rate.overstay_per_hour);
+        VALUES (NEW.customer_id, NEW.id, 'overstay', 0);
       END IF;
 
     ELSIF NEW.status = 'cancelled' AND OLD.status IN ('active', 'pending') THEN
@@ -396,11 +418,24 @@ BEGIN
       );
     END IF;
   ELSIF TG_OP = 'DELETE' THEN
-    PERFORM log_audit(
-      OLD.customer_id,
-      'reservation_deleted',
-      jsonb_build_object('reservation_id', OLD.id, 'booking_code', OLD.booking_code)
-    );
+    -- Only log if the customer still exists - a reservation can also be
+    -- deleted as a CASCADE side effect of the customer's own profile row
+    -- being deleted in the same statement (clear_demo_occupancy(), or any
+    -- future "really delete this customer" admin action). In that case
+    -- OLD.customer_id no longer resolves to a real profiles row by the
+    -- time this fires, and log_audit()'s INSERT into audit_log (actor_id
+    -- REFERENCES profiles(id), no ON DELETE SET NULL) raises a foreign key
+    -- violation and rolls back the whole delete - confirmed live (23503 on
+    -- audit_log_actor_id_fkey) the first time anything in this app
+    -- actually deleted a customer with their own reservations still
+    -- attached.
+    IF EXISTS (SELECT 1 FROM profiles WHERE id = OLD.customer_id) THEN
+      PERFORM log_audit(
+        OLD.customer_id,
+        'reservation_deleted',
+        jsonb_build_object('reservation_id', OLD.id, 'booking_code', OLD.booking_code)
+      );
+    END IF;
   END IF;
   RETURN COALESCE(NEW, OLD);
 END;
@@ -534,13 +569,23 @@ DECLARE
 BEGIN
   SELECT * INTO res FROM reservations WHERE id = reservation_uuid;
   SELECT * INTO rate FROM rates ORDER BY updated_at DESC LIMIT 1;
-  
+
+  -- Bill using the rate captured on THIS reservation at booking time
+  -- (assign_slot_for_reservation()), not whatever's live on `rates` right
+  -- now - same reasoning, and same fallback for pre-existing rows with no
+  -- snapshot yet, as CashPayment.tsx's calculatePayment().
+  IF res.rate_snapshot IS NOT NULL THEN
+    rate.hourly_rate := (res.rate_snapshot->>'hourly_rate')::NUMERIC;
+    rate.overstay_per_hour := (res.rate_snapshot->>'overstay_per_hour')::NUMERIC;
+    rate.grace_period_minutes := (res.rate_snapshot->>'grace_period_minutes')::INTEGER;
+  END IF;
+
   -- Calculate duration
   duration_hours := EXTRACT(EPOCH FROM (res.end_time - res.start_time)) / 3600;
-  
+
   -- Base charge
   base_charge := CEIL(duration_hours) * rate.hourly_rate;
-  
+
   -- Overstay calculation (if status is overstay)
   overstay_hours := 0;
   overstay_surcharge := 0;

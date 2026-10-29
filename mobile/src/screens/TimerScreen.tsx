@@ -108,6 +108,13 @@ export default function TimerScreen() {
 
   const ring = useRef(new Animated.Value(0)).current;
 
+  // Read inside the realtime callback below, which must not re-subscribe on
+  // every render just because activeReservation changed.
+  const activeReservationRef = useRef<Reservation | null>(null);
+  useEffect(() => {
+    activeReservationRef.current = activeReservation;
+  }, [activeReservation]);
+
   useEffect(() => {
     if (!supabase) {
       setLoading(false);
@@ -128,15 +135,35 @@ export default function TimerScreen() {
           filter: `customer_id=eq.${profile?.id}`,
         },
         (payload) => {
-          if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-            const updated = payload.new as Reservation;
-            if (updated.status === 'active' || updated.status === 'verified' || updated.status === 'overstay') {
+          if (payload.eventType !== 'UPDATE' && payload.eventType !== 'INSERT') return;
+
+          const updated = payload.new as Reservation;
+          const qualifies =
+            updated.status === 'active' || updated.status === 'verified' || updated.status === 'overstay';
+          const current = activeReservationRef.current;
+
+          if (current && updated.id === current.id) {
+            // This is the reservation actually on screen - follow its own
+            // transitions (including out of the qualifying set, e.g. paid).
+            if (qualifies) {
               setActiveReservation(updated);
               void loadSlotCode(updated.slot_id);
             } else {
               setActiveReservation(null);
             }
+          } else if (!current && qualifies) {
+            // Nothing shown yet - one of this customer's OTHER reservations
+            // just became active, so adopt it.
+            setActiveReservation(updated);
+            void loadSlotCode(updated.slot_id);
           }
+          // Otherwise: a change on a DIFFERENT reservation than the one
+          // being shown (e.g. a brand-new 'pending' booking's INSERT event)
+          // - leave the current timer exactly as it is. This used to
+          // unconditionally null activeReservation out on any non-qualifying
+          // event regardless of which reservation it was about, so creating
+          // an unrelated new booking could make an already-running timer
+          // for a DIFFERENT, still-active reservation vanish mid-session.
         }
       )
       .subscribe();

@@ -8,7 +8,7 @@ import { Slot, AgentState, Reservation, Profile, Vehicle } from '@parkwise/share
 import {
   LayoutDashboard, LogOut, RefreshCw, Search,
   AlertTriangle, Car, Clock, User, X, Volume2, VolumeX,
-  CheckCircle, ParkingCircle,
+  CheckCircle, ParkingCircle, Wrench,
   Accessibility, ChevronRight, Camera, FileText,
 } from 'lucide-react';
 import ParkingFloorMap from '../components/ParkingFloorMap';
@@ -20,6 +20,7 @@ interface SummaryStats {
   reserved: number;
   available: number;
   alerts: number;
+  maintenance: number;
 }
 
 export default function LiveOccupancyDashboard() {
@@ -52,7 +53,11 @@ export default function LiveOccupancyDashboard() {
     const reserved = slots.filter(s => s.status === 'reserved').length;
     const available = slots.filter(s => s.status === 'available').length;
     const alerts = slots.filter(s => s.status === 'overstay' || s.status === 'unverified').length;
-    return { total, occupied, reserved, available, alerts };
+    // Previously uncounted - occupied+reserved+available+alerts never
+    // summed to `total` whenever any bay was closed for maintenance, which
+    // read as the numbers just not adding up with no explanation.
+    const maintenance = slots.filter(s => s.status === 'maintenance').length;
+    return { total, occupied, reserved, available, alerts, maintenance };
   }, [slots]);
 
   // Filter slots
@@ -293,12 +298,13 @@ export default function LiveOccupancyDashboard() {
 
       <div className="max-w-7xl mx-auto px-4 py-6">
         {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mb-6">
           <SummaryCard label="Total" value={stats.total} icon={ParkingCircle} color="primary" />
           <SummaryCard label="Occupied" value={stats.occupied} icon={Car} color="blue" />
           <SummaryCard label="Reserved" value={stats.reserved} icon={Clock} color="amber" />
           <SummaryCard label="Available" value={stats.available} icon={CheckCircle} color="green" />
           <SummaryCard label="Alerts" value={stats.alerts} icon={AlertTriangle} color="red" alert={stats.alerts > 0} />
+          <SummaryCard label="Maintenance" value={stats.maintenance} icon={Wrench} color="gray" />
         </div>
 
         {/* Search and Filters */}
@@ -439,6 +445,7 @@ function SummaryCard({ label, value, icon: Icon, color, alert }: {
     green: 'bg-green-600 text-white',
     amber: 'bg-amber-600 text-white',
     red: 'bg-red-600 text-white',
+    gray: 'bg-gray-500 text-white',
   };
 
   return (
