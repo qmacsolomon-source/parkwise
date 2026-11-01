@@ -182,3 +182,19 @@ class Database:
         client = cls.get_client()
         response = client.table('rates').select('*').order('updated_at', desc=True).limit(1).maybe_single().execute()
         return response.data if response else None
+
+    @classmethod
+    async def create_gate_command(cls, slot_id: str, slot_code: str, action: str, reservation_id: str = None, requested_by: str = None):
+        """Create a gate command."""
+        client = cls.get_client()
+        data = {
+            'slot_id': slot_id,
+            'slot_code': slot_code,
+            'action': action,
+            'reservation_id': reservation_id,
+            'requested_by': requested_by,
+            'status': 'pending'
+        }
+        response = client.table('gate_commands').insert(data).execute()
+        logger.info("Gate command created", slot_id=slot_id, action=action)
+        return response.data

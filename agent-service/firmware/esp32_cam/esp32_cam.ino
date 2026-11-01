@@ -22,6 +22,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WebServer.h>
+#include <WiFiClientSecure.h>
 #include "esp_camera.h"
 
 // ---------------------------------------------------------------------------
@@ -43,6 +44,69 @@ static const int   AGENT_PORT = 8000;
 // Parking slot this camera watches. Either the slot code ("1A1") or the slot
 // UUID works -- the service resolves both.
 static const char* SLOT_CODE = "1A1";
+
+// --- Gate relay ------------------------------------------------------------
+// Supabase project that holds the gate_commands table (same as ParkWise).
+static const char* SUPABASE_URL      = "https://YOUR_PROJECT.supabase.co";
+static const char* SUPABASE_ANON_KEY = "YOUR_ANON_KEY";
+
+// UART2 -> servo Arduino. GPIO13=RX (from Arduino TX), GPIO14=TX.
+// NOTE: free on ESP32-CAM only when the SD card is NOT used.
+static const int  GATE_RX_PIN = 13;
+static const int  GATE_TX_PIN = 14;
+static const unsigned long GATE_POLL_MS = 3000;
+static unsigned long lastGatePollAt = 0;
+
+void markCommandAcked(const String& id) {
+  WiFiClientSecure client; client.setInsecure();
+  HTTPClient http;
+  String url = String(SUPABASE_URL) + "/rest/v1/gate_commands?id=eq." + id;
+  if (!http.begin(client, url)) return;
+  http.addHeader("apikey", SUPABASE_ANON_KEY);
+  http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("Prefer", "return=minimal");
+  http.PATCH("{\"status\":\"acked\"}");
+  http.end();
+}
+
+void pollGateCommands() {
+  if (WiFi.status() != WL_CONNECTED) return;
+
+  WiFiClientSecure client; client.setInsecure();
+  HTTPClient http;
+  String url = String(SUPABASE_URL) + "/rest/v1/gate_commands?slot_code=eq." + SLOT_CODE +
+               "&status=eq.pending&order=created_at.asc&limit=1";
+  if (!http.begin(client, url)) return;
+  http.addHeader("apikey", SUPABASE_ANON_KEY);
+  http.addHeader("Authorization", String("Bearer ") + SUPABASE_ANON_KEY);
+
+  if (http.GET() == 200) {
+    String body = http.getString();
+    int idPos = body.indexOf("\"id\":\"");
+    if (idPos >= 0) {
+      String id = body.substring(idPos + 6, body.indexOf('\"', idPos + 6));
+      bool open = body.indexOf("\"action\":\"open\"") >= 0;
+
+      Serial2.begin(9600, SERIAL_8N1, GATE_RX_PIN, GATE_TX_PIN);
+      Serial2.print(open ? "OPEN 1\n" : "CLOSE 1\n");
+
+      unsigned long t = millis();
+      String ack = "";
+      while (ack.indexOf("ACK") < 0 && millis() - t < 2000) {
+        while (Serial2.available()) ack += (char)Serial2.read();
+        delay(10);
+      }
+      if (ack.indexOf("ACK") >= 0) {
+        Serial.printf("[gate] command %s acked by servo board\n", open ? "OPEN" : "CLOSE");
+        markCommandAcked(id);
+      } else {
+        Serial.println("[gate] no ack from servo board");
+      }
+    }
+  }
+  http.end();
+}
 
 // How often to capture and send a frame. The camera is the only sensor, so it
 // polls continuously; must be greater than 0.
@@ -222,6 +286,11 @@ void loop() {
   if (millis() - lastSendAt >= SEND_INTERVAL_MS) {
     lastSendAt = millis();
     sendFrame();
+  }
+
+  if (millis() - lastGatePollAt >= GATE_POLL_MS) {
+    lastGatePollAt = millis();
+    pollGateCommands();
   }
 
   delay(10);

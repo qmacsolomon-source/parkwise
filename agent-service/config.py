@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # eye via POST /agents/{slot_id}/confirm instead of the agent trusting a
     # shaky read on its own.
     auto_verify_confidence_threshold: float = 0.6
+    # If a confidently-read plate doesn't match the expected one, how many
+    # consecutive frames before declaring an intruder alert.
+    intruder_alert_after_frames: int = 3
     frame_storage_bucket: str = "frames"
     
     # ESP32-CAM hardware

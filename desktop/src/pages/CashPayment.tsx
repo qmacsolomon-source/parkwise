@@ -300,6 +300,18 @@ export default function CashPayment() {
       // Complete reservation
       await supabase.from('reservations').update({ status: 'completed' }).eq('id', selectedReservation.id);
 
+      // Open the gate for exit
+      const slotCode = slots[selectedReservation.slot_id]?.slot_code;
+      if (slotCode) {
+        await supabase.from('gate_commands').insert({
+          slot_id: selectedReservation.slot_id,
+          slot_code: slotCode,
+          action: 'open',
+          reservation_id: selectedReservation.id,
+          requested_by: user?.id
+        });
+      }
+
       // Free the slot
       await supabase.from('slots').update({ 
         status: 'available',

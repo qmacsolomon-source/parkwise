@@ -35,6 +35,7 @@ class SlotAgent:
         self.detected_plate: Optional[str] = None
         self.confidence: float = 0.0
         self.retry_count = 0
+        self.mismatch_count = 0
         self.last_frame: Optional[bytes] = None
         self.last_frame_time: Optional[datetime] = None
         self.reservation_id: Optional[str] = None
@@ -381,9 +382,26 @@ class SlotAgent:
             match = is_match(self.detected_plate, self.expected_plate)
             if match and self.confidence >= settings.auto_verify_confidence_threshold:
                 # Plate matches and the OCR read was confident - verify automatically
+                self.mismatch_count = 0  # Reset on any clean match
                 await self._verify_success()
                 return
+            
+            # --- Branch B: Confident NON-match = Intruder ---
+            if not match and self.confidence >= settings.auto_verify_confidence_threshold:
+                self.mismatch_count += 1
+                logger.warning("Confident mismatch detected", slot_id=self.slot_id, 
+                               detected=self.detected_plate, expected=self.expected_plate,
+                               mismatch_count=self.mismatch_count)
+                
+                if self.mismatch_count >= settings.intruder_alert_after_frames:
+                    logger.error("Intruder alert! Confident mismatch exceeded threshold", 
+                                 slot_id=self.slot_id, detected=self.detected_plate)
+                    await self._raise_alert("intruder_plate")
+                    return
+                # Don't auto-pass if we are seeing a confident mismatch
+                return
 
+        # --- Branch A: Unreadable / Low Confidence ---
         # No real OCR match yet - either nothing readable this frame, or a
         # mismatch/low-confidence read. The attendant sees the live photo +
         # detected text on their screen the whole time and can call
@@ -518,6 +536,15 @@ class SlotAgent:
         # Update slot status
         await Database.update_slot_status(self.slot_id, 'occupied', self.reservation_id)
         
+        # Trigger gate close
+        if slot:
+            await Database.create_gate_command(
+                slot_id=self.slot_id,
+                slot_code=slot['slot_code'],
+                action='close',
+                reservation_id=self.reservation_id
+            )
+
         # Create verification event
         if self.reservation_id:
             await Database.create_verification_event(

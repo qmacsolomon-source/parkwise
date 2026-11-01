@@ -318,9 +318,23 @@ export default function SlotAssignment() {
       // current_reservation_id - after every reassignment of a not-yet-
       // accepted booking.
       if (oldSlot && oldSlot.current_reservation_id === selectedReservation.id) {
+        // If the reassign was triggered because of an intruder (ALERT state),
+        // don't free the slot to 'available' - keep it 'unverified' to flag
+        // the intruder for the attendant.
+        const { data: agentState } = await supabase
+          .from('agent_states')
+          .select('state')
+          .eq('slot_id', oldSlot.id)
+          .maybeSingle();
+
+        const isIntruder = agentState?.state === 'alert';
+        
         await supabase
           .from('slots')
-          .update({ status: 'available', current_reservation_id: null })
+          .update({ 
+            status: isIntruder ? 'unverified' : 'available', 
+            current_reservation_id: null 
+          })
           .eq('id', oldSlot.id);
       }
 
