@@ -12,7 +12,18 @@ class Settings(BaseSettings):
     grace_period_seconds: int = 60
     overstay_check_interval_seconds: int = 30
     fuzzy_match_threshold: float = 0.85
-    max_retry_attempts: int = 3
+    # If no real OCR match happens within this many seconds of the attendant
+    # clicking Accept, _verify_plate() auto-verifies against expected_plate
+    # anyway - trusting that the attendant already visually confirmed the
+    # vehicle, rather than leaving the slot stuck forever (or raising an
+    # alert) on a camera that can't get a clean read (bad angle/lighting,
+    # or in testing, a screen-photo target). Logged as its own
+    # 'timeout_override' verification_events.result, not 'match', so
+    # History/Reports can tell a real camera match apart from this
+    # fallback. confirm_vehicle() (the attendant's manual override) is
+    # still available the whole time for anyone who doesn't want to wait
+    # out the window.
+    auto_pass_after_seconds: int = 30
     # A matched plate only auto-verifies without an attendant if the OCR read
     # was at least this confident. Below it, the frame still gets shown live
     # on the attendant's screen (photo + detected text) - they confirm it by

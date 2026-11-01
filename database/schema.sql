@@ -33,7 +33,7 @@ DO $$ BEGIN
   CREATE TYPE agent_state AS ENUM ('idle', 'waiting', 'verifying', 'verified', 'alert');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
-  CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed');
+  CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed', 'timeout_override');
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN
   CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');

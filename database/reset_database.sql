@@ -54,7 +54,7 @@ CREATE TYPE user_status AS ENUM ('active', 'disabled');
 CREATE TYPE slot_status AS ENUM ('available', 'reserved', 'occupied', 'unverified', 'overstay', 'maintenance');
 CREATE TYPE reservation_status AS ENUM ('pending', 'active', 'verified', 'completed', 'cancelled', 'no_show', 'overstay');
 CREATE TYPE agent_state AS ENUM ('idle', 'waiting', 'verifying', 'verified', 'alert');
-CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed');
+CREATE TYPE verification_result AS ENUM ('match', 'mismatch', 'low_confidence', 'failed', 'timeout_override');
 CREATE TYPE penalty_type AS ENUM ('late_cancel', 'no_show', 'overstay');
 CREATE TYPE payment_status AS ENUM ('unpaid', 'paid');
 CREATE TYPE notification_type AS ENUM ('reservation', 'verification', 'payment', 'penalty', 'system');

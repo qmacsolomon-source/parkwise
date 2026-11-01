@@ -21,16 +21,23 @@
 
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <WebServer.h>
 #include "esp_camera.h"
 
 // ---------------------------------------------------------------------------
 // CONFIGURE ME
 // ---------------------------------------------------------------------------
-static const char* WIFI_SSID     = "your_wifi";
-static const char* WIFI_PASSWORD = "your_password";
+// --- HOTSPOT CONFIG (a phone hotspot avoids the school WiFi splitting the
+// camera/laptop onto different subnets, which the LAN-IP requirement below
+// needs them not to be) - fill in your own before flashing, never commit
+// real values here. ---
+static const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+static const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
 
-// LAN address of the machine running `uvicorn main:app --host 0.0.0.0 --port 8000`
-static const char* AGENT_HOST = "192.168.1.20";
+// LAN address of the machine running `uvicorn main:app --host 0.0.0.0 --port 8000`.
+// Find it with `ipconfig` (Windows) / `ifconfig` (Mac/Linux) on that machine -
+// changes whenever that machine rejoins the network, so re-flash when it does.
+static const char* AGENT_HOST = "YOUR_AGENT_SERVICE_LAN_IP";
 static const int   AGENT_PORT = 8000;
 
 // Parking slot this camera watches. Either the slot code ("1A1") or the slot
@@ -39,7 +46,14 @@ static const char* SLOT_CODE = "1A1";
 
 // How often to capture and send a frame. The camera is the only sensor, so it
 // polls continuously; must be greater than 0.
-static const unsigned long SEND_INTERVAL_MS = 15000;
+static const unsigned long SEND_INTERVAL_MS = 5000;
+
+// The IR obstacle/reflective sensor lives on a SEPARATE board now (both
+// boards need to stay fully seated in their own adapters to be reliable -
+// a shared GPIO wire between them was too flaky). The sensor board calls
+// this board's HTTP server at /trigger over WiFi instead, so there's no
+// physical connection between the two at all.
+WebServer server(80);
 
 // ---------------------------------------------------------------------------
 // AI-Thinker ESP32-CAM camera pin map
@@ -105,9 +119,9 @@ bool initCamera() {
     return false;
   }
 
-  // Some AI-Thinker boards mount the camera module upside-down - confirmed
-  // visually via a live-stream test sketch on real hardware. If your board
-  // captures right-side-up already, remove these two lines.
+  // This camera module is mounted/wired upside-down - confirmed visually via
+  // the live-stream test sketch. Correct it here rather than needing every
+  // plate (or the camera's physical mount) to compensate for it.
   sensor_t *s = esp_camera_sensor_get();
   s->set_vflip(s, 1);
   s->set_hmirror(s, 1);
@@ -178,7 +192,7 @@ bool sendFrame() {
 
 // --- Arduino ----------------------------------------------------------------
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(9600);
   delay(600);
   Serial.println("\n=== ParkWise ESP32-CAM ===");
   Serial.printf("slot=%s agent=http://%s:%d\n", SLOT_CODE, AGENT_HOST, AGENT_PORT);
@@ -189,13 +203,26 @@ void setup() {
   }
 
   connectWiFi();
+
+  // The sensor board hits this when it detects a car, instead of a shared
+  // GPIO wire. Reuses the exact same sendFrame() the timer already calls.
+  server.on("/trigger", HTTP_GET, []() {
+    Serial.println("[trigger] received from sensor board, sending frame now");
+    lastSendAt = millis();
+    bool ok = sendFrame();
+    server.send(200, "text/plain", ok ? "ok" : "send failed");
+  });
+  server.begin();
+  Serial.println("[http] trigger server listening on port 80");
 }
 
 void loop() {
+  server.handleClient();
+
   if (millis() - lastSendAt >= SEND_INTERVAL_MS) {
     lastSendAt = millis();
     sendFrame();
   }
 
-  delay(50);
+  delay(10);
 }

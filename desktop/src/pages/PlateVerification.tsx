@@ -193,27 +193,13 @@ export default function PlateVerification() {
 
       if (activateError) throw activateError;
 
-      // TEMPORARY, FOR DEMO/TESTING WITHOUT HARDWARE - ask whether to
-      // revert this the next time the project comes up.
-      //
-      // This used to revert the activation above (and re-throw, triggering
-      // the "Failed to start verification" alert) whenever either
-      // agent-service call below failed, on the reasoning that a failure
-      // here left the reservation 'active' with nothing actually armed and
-      // no grace timer ever running - a silent "in progress forever" state.
-      // That's the SAFE behavior for a real deployment with a real camera,
-      // where agent-service failing usually means something is actually
-      // wrong.
-      //
-      // While testing without the physical camera/agent-service running,
-      // that safety net makes Start Verification unusable - every call
-      // fails before the reservation ever gets a chance to activate. Both
-      // calls are now best-effort instead (matches how ManualEntry.tsx and
-      // SlotAssignment.tsx already treat these same two endpoints elsewhere
-      // in this app): the reservation stays 'active' regardless, the camera
-      // panel just shows blank (no live photo/detected plate, since nothing
-      // is actually watching), and Manual Override is the way to actually
-      // finish the reservation in this state.
+      // From here on, a failure leaves the reservation 'active' with
+      // nothing actually armed - unlike every other failure path in this
+      // system, nothing ever surfaces that later (no grace timer starts
+      // until accept_vehicle() actually runs), so it would otherwise sit
+      // silently "in progress" forever rather than visibly failing. Revert
+      // the activation on any failure here so "Failed to start
+      // verification" is actually true again, not a stale half-step.
       try {
         // Point the one real camera at this slot before arming it. With
         // only one physical ESP32-CAM for testing, its firmware always
@@ -242,53 +228,11 @@ export default function PlateVerification() {
 
         if (!response.ok) throw new Error('Failed to start verification');
       } catch (agentError) {
-        console.warn('agent-service unreachable - verification started without it (demo mode):', agentError);
-
-        // TEMPORARY, FOR DEMO/TESTING WITHOUT HARDWARE - same flag as
-        // above, ask whether to revert this next time the project comes
-        // up. With no real camera running, detected_plate would otherwise
-        // never be written at all (agent.py is what normally writes it),
-        // so this screen would show expected/detected as blank/mismatched
-        // forever - not a convincing demo of what a successful camera
-        // match looks like. Fakes exactly that: writes expected_plate
-        // immediately (what agent.py's accept_vehicle() would have done),
-        // then 5 seconds later sets detected_plate to the SAME plate and
-        // marks the reservation 'verified' - the same end state a real
-        // camera match produces, just on a timer instead of a real frame.
-        // Known not correct (a real camera could easily misread it) -
-        // that's the explicit point, for demonstration purposes only.
-        const slotId = selectedSlot.id;
-        const reservationId = selectedReservation.id;
-        const plate = vehicles[selectedReservation.vehicle_id]?.plate_number ?? '';
-
         await supabase
-          .from('agent_states')
-          .update({
-            state: 'waiting',
-            expected_plate: plate,
-            accepted_at: new Date().toISOString(),
-            detected_plate: null,
-            confidence: null,
-          })
-          .eq('slot_id', slotId);
-
-        setTimeout(async () => {
-          await supabase
-            .from('agent_states')
-            .update({ state: 'verified', detected_plate: plate, confidence: 0.99 })
-            .eq('slot_id', slotId);
-
-          await supabase.from('reservations').update({ status: 'verified' }).eq('id', reservationId);
-
-          await supabase.from('verification_events').insert({
-            slot_id: slotId,
-            reservation_id: reservationId,
-            detected_plate: plate,
-            expected_plate: plate,
-            confidence: 0.99,
-            result: 'match',
-          });
-        }, 5000);
+          .from('reservations')
+          .update({ status: selectedReservation.status })
+          .eq('id', selectedReservation.id);
+        throw agentError;
       }
 
       // Stay on this slot's panel, deliberately - starting verification is
@@ -831,7 +775,9 @@ export default function PlateVerification() {
                           Confidence: {(event.confidence * 100).toFixed(1)}%
                         </p>
                         <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs mt-1 ${
-                          event.result === 'match' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          event.result === 'match' ? 'bg-green-100 text-green-800'
+                            : event.result === 'timeout_override' ? 'bg-amber-100 text-amber-800'
+                            : 'bg-red-100 text-red-800'
                         }`}>
                           {event.result}
                         </div>

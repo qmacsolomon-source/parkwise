@@ -582,7 +582,9 @@ export default function TimeAndPaymentLog() {
                                 </p>
                               </div>
                               <span className={`px-2 py-1 rounded text-xs font-medium ${
-                                event.result === 'match' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                event.result === 'match' ? 'bg-green-100 text-green-800'
+                                  : event.result === 'timeout_override' ? 'bg-amber-100 text-amber-800'
+                                  : 'bg-red-100 text-red-800'
                               }`}>
                                 {event.result}
                               </span>

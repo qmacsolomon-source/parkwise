@@ -232,7 +232,7 @@ Edit `.env` to configure:
 GRACE_PERIOD_SECONDS=60              # Time to verify after acceptance
 OVERSTAY_CHECK_INTERVAL_SECONDS=30   # How often to check for overstay
 FUZZY_MATCH_THRESHOLD=0.85           # Similarity threshold for match
-MAX_RETRY_ATTEMPTS=3                 # Max frames to try for verification
+AUTO_PASS_AFTER_SECONDS=300          # Auto-verify on expected plate if no real OCR match lands within this long
 FRAME_STORAGE_BUCKET=frames          # Supabase Storage bucket name
 
 # Model Configuration

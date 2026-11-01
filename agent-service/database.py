@@ -28,10 +28,13 @@ class Database:
     async def get_slot(cls, slot_id: str):
         """Get slot by ID."""
         client = cls.get_client()
-        response = client.table('slots').select('*').eq('id', slot_id).single().execute()
-        if response.data:
-            return response.data
-        return None
+        # maybe_single()'s own .execute() returns None itself (not an object
+        # with .data=None) on zero matching rows in this postgrest-py
+        # version - checking response.data before checking response crashed
+        # with "'NoneType' object has no attribute 'data'" on every lookup
+        # that legitimately found nothing.
+        response = client.table('slots').select('*').eq('id', slot_id).maybe_single().execute()
+        return response.data if response else None
     
     @classmethod
     async def resolve_slot(cls, slot_ref: str):
@@ -67,8 +70,9 @@ class Database:
         Get the reservation currently holding a slot.
 
         "Live" mirrors the no_overlapping_reservations EXCLUDE constraint in
-        schema.sql: anything not cancelled/completed/no_show. get_active_reservation()
-        only looks for status='active', which misses 'pending' bookings.
+        schema.sql: anything not cancelled/completed/no_show. The old
+        get_active_reservation() (removed) only looked for status='active',
+        which missed 'pending', 'verified', and 'overstay' reservations too.
 
         The status filter is applied here rather than in the query so it does not
         depend on the postgrest client's negation API.
@@ -99,10 +103,8 @@ class Database:
     async def get_agent_state(cls, slot_id: str):
         """Get agent state for slot."""
         client = cls.get_client()
-        response = client.table('agent_states').select('*').eq('slot_id', slot_id).single().execute()
-        if response.data:
-            return response.data
-        return None
+        response = client.table('agent_states').select('*').eq('slot_id', slot_id).maybe_single().execute()
+        return response.data if response else None
     
     @classmethod
     async def update_agent_state(cls, slot_id: str, updates: dict):
@@ -132,15 +134,6 @@ class Database:
         response = client.table('slots').update(updates).eq('id', slot_id).execute()
         logger.info("Slot status updated", slot_id=slot_id, status=status)
         return response.data
-    
-    @classmethod
-    async def get_active_reservation(cls, slot_id: str):
-        """Get active reservation for slot."""
-        client = cls.get_client()
-        response = client.table('reservations').select('*').eq('slot_id', slot_id).eq('status', 'active').limit(1).execute()
-        if response.data:
-            return response.data[0]
-        return None
     
     @classmethod
     async def update_reservation_status(cls, reservation_id: str, status: str):
@@ -173,25 +166,19 @@ class Database:
     async def get_profile(cls, user_id: str):
         """Get user profile."""
         client = cls.get_client()
-        response = client.table('profiles').select('*').eq('id', user_id).single().execute()
-        if response.data:
-            return response.data
-        return None
+        response = client.table('profiles').select('*').eq('id', user_id).maybe_single().execute()
+        return response.data if response else None
     
     @classmethod
     async def get_vehicle(cls, plate_number: str):
         """Get vehicle by plate number."""
         client = cls.get_client()
-        response = client.table('vehicles').select('*').eq('plate_number', plate_number).single().execute()
-        if response.data:
-            return response.data
-        return None
+        response = client.table('vehicles').select('*').eq('plate_number', plate_number).maybe_single().execute()
+        return response.data if response else None
     
     @classmethod
     async def get_rates(cls):
         """Get current rates."""
         client = cls.get_client()
-        response = client.table('rates').select('*').order('updated_at', desc=True).limit(1).single().execute()
-        if response.data:
-            return response.data
-        return None
+        response = client.table('rates').select('*').order('updated_at', desc=True).limit(1).maybe_single().execute()
+        return response.data if response else None

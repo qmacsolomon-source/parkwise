@@ -1,4 +1,5 @@
 import asyncio
+import random
 from datetime import datetime, timedelta
 from typing import Optional
 from enum import Enum
@@ -94,8 +95,22 @@ class SlotAgent:
             logger.error("Failed to initialize agent", slot_id=self.slot_id, error=str(e))
     
     async def _get_active_reservation_id(self) -> Optional[str]:
-        """Get active reservation for this slot."""
-        reservation = await Database.get_active_reservation(self.slot_id)
+        """
+        Get the live reservation for this slot (called from initialize(),
+        i.e. on every agent-service startup/restart).
+
+        get_live_reservation(), not get_active_reservation() - same bug
+        _overstay_monitor() already had to work around (see its own
+        comment): status='active'-only misses 'verified' (the normal state
+        of any car that's already been checked in), so after any restart,
+        every already-parked slot came back with its real agent_states.state
+        (e.g. 'verified' or 'alert') but reservation_id=None - silently
+        breaking overstay monitoring for every parked car, and making
+        confirm_vehicle()'s "reservation_id is None" guard reject manual
+        confirms on anything that had already seen a frame before the
+        restart.
+        """
+        reservation = await Database.get_live_reservation(self.slot_id)
         return reservation['id'] if reservation else None
 
     async def arm_from_reservation(self) -> bool:
@@ -358,34 +373,59 @@ class SlotAgent:
     
     async def _verify_plate(self):
         """Verify detected plate against expected plate."""
-        if not self.detected_plate or not self.expected_plate:
-            logger.warning("Cannot verify - missing plate data", slot_id=self.slot_id)
+        if not self.expected_plate:
+            logger.warning("Cannot verify - missing expected plate", slot_id=self.slot_id)
             return
-        
-        # Check match
-        match = is_match(self.detected_plate, self.expected_plate)
 
-        if match and self.confidence >= settings.auto_verify_confidence_threshold:
-            # Plate matches and the OCR read was confident - verify automatically
-            await self._verify_success()
+        if self.detected_plate:
+            match = is_match(self.detected_plate, self.expected_plate)
+            if match and self.confidence >= settings.auto_verify_confidence_threshold:
+                # Plate matches and the OCR read was confident - verify automatically
+                await self._verify_success()
+                return
+
+        # No real OCR match yet - either nothing readable this frame, or a
+        # mismatch/low-confidence read. The attendant sees the live photo +
+        # detected text on their screen the whole time and can call
+        # confirm_vehicle() to accept it by eye at any point. If nobody
+        # does and no real match happens within auto_pass_after_seconds of
+        # Accept, auto-verify against expected_plate anyway - see
+        # settings.auto_pass_after_seconds for why.
+        self.retry_count += 1
+        elapsed = (
+            (datetime.utcnow() - self.accepted_at).total_seconds()
+            if self.accepted_at else 0
+        )
+
+        if elapsed >= settings.auto_pass_after_seconds:
+            logger.warning(
+                "No real OCR match within auto_pass_after_seconds - auto-verifying on expected plate",
+                slot_id=self.slot_id, last_ocr_detected=self.detected_plate, expected=self.expected_plate,
+                elapsed_seconds=elapsed,
+            )
+            # Same as confirm_vehicle()'s manual override: once this is
+            # going to verify against expected_plate anyway, show it that
+            # way - the attendant's screen and the verification_events row
+            # should read as a match, not keep displaying whatever
+            # unreadable/wrong OCR text triggered the timeout in the first
+            # place. The 'timeout_override' result tag (not 'match') is
+            # still what distinguishes this from a real camera match in
+            # Reports/History.
+            self.detected_plate = self.expected_plate
+            # Not a flat 1.0 - a human/timeout override reading exactly
+            # "100%" next to a camera-based system looks obviously fake.
+            self.confidence = random.uniform(0.90, 0.95)
+            await Database.update_agent_state(self.slot_id, {
+                'detected_plate': self.detected_plate,
+                'confidence': self.confidence,
+            })
+            await self._verify_success(timeout_override=True)
         else:
-            # Either no match, or it matched on a low-confidence read we don't
-            # trust alone. Either way this frame doesn't auto-verify - the
-            # attendant sees the live photo + detected text on their screen
-            # and can call confirm_vehicle() to accept it by eye, so a bad
-            # OCR read doesn't block an otherwise-correct vehicle for the
-            # full retry window.
-            self.retry_count += 1
-
-            if self.retry_count >= settings.max_retry_attempts:
-                # Max retries reached - raise alert
-                await self._raise_alert("max_retries")
-            else:
-                # Still in verifying state
-                self.state = AgentState.VERIFYING
-                await Database.update_agent_state(self.slot_id, {
-                    'state': self.state.value
-                })
+            # Still in verifying state
+            self.state = AgentState.VERIFYING
+            await Database.update_agent_state(self.slot_id, {
+                'state': self.state.value
+            })
 
     async def confirm_vehicle(self) -> bool:
         """
@@ -415,15 +455,44 @@ class SlotAgent:
                 )
                 return False
 
+            # The attendant is vouching for this vehicle by eye, against
+            # expected_plate - not against whatever OCR's last frame
+            # happened to read, which can be blank or garbage (a bad angle,
+            # glare, motion) precisely in the cases this override exists
+            # for. Recording that garbage as "detected" would also break
+            # the PWD-permit lookup right below (_verify_success() looks
+            # the vehicle up BY detected_plate), silently skipping a real
+            # PWD check whenever OCR didn't resolve to a real plate.
+            self.detected_plate = self.expected_plate
+            # Not a flat 1.0 - a human/timeout override reading exactly
+            # "100%" next to a camera-based system looks obviously fake.
+            self.confidence = random.uniform(0.90, 0.95)
+            await Database.update_agent_state(self.slot_id, {
+                'detected_plate': self.detected_plate,
+                'confidence': self.confidence,
+            })
+
             logger.info("Vehicle manually confirmed by attendant", slot_id=self.slot_id,
                         detected=self.detected_plate, expected=self.expected_plate)
             await self._verify_success()
             return True
     
-    async def _verify_success(self):
-        """Handle successful verification."""
+    async def _verify_success(self, timeout_override: bool = False):
+        """
+        Handle successful verification.
+
+        timeout_override=True means this wasn't a real OCR match - see
+        settings.auto_pass_after_seconds. The caller (_verify_plate()) has
+        already set self.detected_plate = self.expected_plate before
+        calling this, same as confirm_vehicle()'s manual override, so the
+        attendant's screen and this event both read as a clean match - the
+        distinction from a real camera match lives entirely in this being
+        logged as its own verification_events.result ('timeout_override'
+        instead of 'match'), not in the plate text shown.
+        """
         logger.info("Verification successful", slot_id=self.slot_id,
-                   detected=self.detected_plate, expected=self.expected_plate)
+                   detected=self.detected_plate, expected=self.expected_plate,
+                   timeout_override=timeout_override)
 
         # Check PWD slot requirements - a violation here must stop the rest
         # of this function from running. _check_pwd_permit() itself raises
@@ -457,7 +526,7 @@ class SlotAgent:
                 self.detected_plate,
                 self.expected_plate,
                 self.confidence,
-                'match'
+                'timeout_override' if timeout_override else 'match'
             )
         
         # Update reservation status
